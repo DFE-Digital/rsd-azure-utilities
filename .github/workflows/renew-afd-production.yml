@@ -1,0 +1,26 @@
+name: Production / Refresh AFD Custom Domains
+
+on:
+  workflow_dispatch:
+  schedule:
+    # At 05:00 every morning
+    - cron: '0 5 * * *'
+
+jobs:
+  refresh:
+    runs-on: ubuntu
+    environment: production
+    steps:
+      - name: Azure login with SP
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_SUBSCRIPTION_CREDENTIALS }}
+
+      - name: Clone repo
+        uses: actions/checkout@v4
+
+      - name: Ensure script is executable
+        run: chmod +x ./afd-domain-scan.sh
+
+      - name: Execute task
+        run: bash ./afd-domain-scan.sh -s ${{ secrets.AZURE_SUBSCRIPTION_NAME }}
