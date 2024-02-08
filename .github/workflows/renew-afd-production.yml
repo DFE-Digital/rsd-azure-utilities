@@ -1,4 +1,4 @@
-name: Production / Refresh AFD Custom Domains
+name: Refresh / Production
 
 on:
   workflow_dispatch:

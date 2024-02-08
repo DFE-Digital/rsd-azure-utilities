@@ -1,4 +1,4 @@
-name: Test / Refresh AFD Custom Domain validation
+name: Refresh / Test
 
 on:
   workflow_dispatch:
