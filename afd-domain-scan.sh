@@ -3,6 +3,7 @@ set -e
 
 TODAY=$(date -Idate)
 TZ=Europe/London
+SILENT=0
 
 ################################################################################
 # Author:
@@ -15,17 +16,21 @@ TZ=Europe/London
 #   'pending' state then a new domain validation token is requested and the DNS
 #   TXT record set is updated with the new token.
 # Usage:
-#   ./afd-domain-scan.sh [-s <subscription name>]
+#   ./afd-domain-scan.sh [-s <subscription name>] [-q]
 #      -s       <subscription name>      (optional) Azure Subscription
+#      -q                                (optional) Suppress output
 #
 #   If you do not specify the subscription name, the script will prompt you to
-#   select one based on the current logged in Azure user.
+#   select one based on the current logged in Azure user
 ################################################################################
 
-while getopts "s:" opt; do
+while getopts "s:q" opt; do
   case $opt in
     s)
       AZ_SUBSCRIPTION_SCOPE=$OPTARG
+      ;;
+    q)
+      SILENT=1
       ;;
     *)
       ;;
@@ -85,7 +90,11 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
   RESOURCE_GROUP=$(echo "$AZURE_FRONT_DOOR" | jq -rc '.resourceGroup')
   AFD_NAME=$(echo "$AZURE_FRONT_DOOR" | jq -rc '.name')
 
-  echo "  🚪 Azure Front Door $AFD_NAME in Resource Group $RESOURCE_GROUP..."
+  if [ $SILENT == 1 ]; then
+    echo "  🚪 Azure Front Door found..."
+  else
+    echo "  🚪 Azure Front Door $AFD_NAME in Resource Group $RESOURCE_GROUP..."
+  fi
 
   # Grab all the custom domains attached to the Azure Front Door
   ALL_CUSTOM_DOMAINS=$(
@@ -120,7 +129,11 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
       DOMAIN_TOKEN=$(echo "$DOMAIN" | jq -rc '.validationProperties.validationToken')
       DOMAIN_DNS_ZONE_ID=$(echo "$DOMAIN" | jq -rc '.azureDnsZone.id')
 
-      echo "     🌐 $DOMAIN_NAME = $STATE"
+      if [ $SILENT == 1 ]; then
+        echo "     🌐 Found a domain with $STATE state"
+      else
+        echo "     🌐 $DOMAIN_NAME = $STATE"
+      fi
 
       if [ "$STATE" == "Pending" ] || [ "$STATE" == "PendingRevalidation" ]; then
         # Check expiry of existing token

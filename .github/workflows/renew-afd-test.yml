@@ -23,4 +23,4 @@ jobs:
         run: chmod +x ./afd-domain-scan.sh
 
       - name: Execute task
-        run: bash ./afd-domain-scan.sh -s ${{ secrets.AZURE_SUBSCRIPTION_NAME }}
+        run: bash ./afd-domain-scan.sh -s ${{ secrets.AZURE_SUBSCRIPTION_NAME }} -q
