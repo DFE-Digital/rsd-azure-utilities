@@ -1,4 +1,4 @@
-name: Refresh / Production
+name: Azure Front Door / Production
 
 on:
   workflow_dispatch:

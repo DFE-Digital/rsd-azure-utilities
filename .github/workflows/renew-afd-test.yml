@@ -1,4 +1,4 @@
-name: Refresh / Test
+name: Azure Front Door / Test
 
 on:
   workflow_dispatch:
