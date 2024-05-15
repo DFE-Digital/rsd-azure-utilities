@@ -7,7 +7,7 @@ echo "Attempting to login..."
 az login --identity --username "${CLIENT_ID}"
 
 echo "Beginning job..."
-while true:
+while :
 do
   bash /afd-domain-scan.sh
   echo
