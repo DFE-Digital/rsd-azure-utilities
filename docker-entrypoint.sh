@@ -1,6 +1,4 @@
 #!/bin/bash
-echo "Environment:"
-printenv
 
 # Log in with Azure Identity
 echo "Attempting to login..."
