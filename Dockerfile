@@ -3,5 +3,3 @@ LABEL org.opencontainers.image.source=https://github.com/DFE-Digital/rsd-afd-cus
 
 COPY afd-domain-scan.sh /
 COPY docker-entrypoint.sh /
-
-CMD ["bash", "/docker-entrypoint.sh"]
