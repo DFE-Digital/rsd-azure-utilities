@@ -3,6 +3,12 @@
 set -e
 set -o pipefail
 
+# Check connectivity
+echo "Checking connectivity..."
+apt-get update
+apt install dnsutils
+nslookup login.microsoftonline.com
+
 # Log in with Azure Identity
 echo "Attempting to login..."
 az login --identity
