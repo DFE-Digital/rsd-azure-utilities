@@ -1,6 +1,6 @@
 locals {
   region                             = "westeurope"
-  environment                        = "s184d01-"
+  environment                        = var.environment
   project_name                       = "afd-domain-renewal"
   resource_prefix                    = "${local.environment}${local.project_name}"
   registry_server                    = var.registry_server

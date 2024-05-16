@@ -37,6 +37,7 @@ No modules.
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
+| <a name="input_environment"></a> [environment](#input\_environment) | Environment name | `string` | n/a | yes |
 | <a name="input_registry_password"></a> [registry\_password](#input\_registry\_password) | Password for authenticating to the Container Registry | `string` | n/a | yes |
 | <a name="input_registry_server"></a> [registry\_server](#input\_registry\_server) | Hostname of the Container Registry | `string` | n/a | yes |
 | <a name="input_registry_username"></a> [registry\_username](#input\_registry\_username) | Username for authenticating to the Container Registry | `string` | n/a | yes |
