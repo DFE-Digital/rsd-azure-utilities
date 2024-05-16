@@ -5,7 +5,7 @@ set -o pipefail
 
 # Log in with Azure Identity
 echo "Attempting to login..."
-az login --identity
+az login --identity --username "${AZ_IDENTITY}"
 
 echo "Beginning job..."
 while :
