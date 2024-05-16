@@ -35,7 +35,6 @@ resource "azurerm_container_group" "default" {
     }
 
     environment_variables = {
-      "CLIENT_ID"             = azurerm_user_assigned_identity.default.client_id
       "AZ_SUBSCRIPTION_SCOPE" = data.azurerm_subscription.current.display_name
     }
   }
