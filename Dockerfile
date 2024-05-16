@@ -6,3 +6,7 @@ RUN chmod +x /afd-domain-scan.sh
 
 COPY docker-entrypoint.sh /
 RUN chmod +x /docker-entrypoint.sh
+
+COPY notify.sh /
+COPY slack-webhook.json /
+RUN chmod +x /notify.sh

@@ -5,11 +5,17 @@ TODAY=$(date -Idate)
 TZ=Europe/London
 SILENT=0
 
+NOTIFY=1
+
+if [ -z "$SLACK_WEBHOOK_URL" ]; then
+  NOTIFY=0
+fi
+
 ################################################################################
 # Author:
 #   Ash Davies <@DrizzlyOwl>
 # Version:
-#   0.1.0
+#   0.1.1
 # Description:
 #   Search an Azure Subscription for Azure Front Door Custom Domains that are
 #   secured using Azure Managed TLS Certificates. If the Custom Domain is in a
@@ -73,6 +79,16 @@ if [ -z "${AZ_SUBSCRIPTION_SCOPE}" ]; then
   fi
 fi
 
+if [ $NOTIFY == 1 ]; then
+  bash ./notify.sh \
+    -t "🎯 *Scheduled task started in \`$AZ_SUBSCRIPTION_SCOPE\`*" \
+    -l ":lock: AFD Domain Validation Renewal" \
+    -d "_Any custom domains attached to an Azure Front Door that are pending revalidation will have the DNS records updated so that Azure-managed TLS Certificates can be renewed automatically_"
+
+  bash ./notify.sh \
+    -t "🔎 Looking for Azure Front Door CDNs..."
+fi
+
 echo "🎯 Using subscription $AZ_SUBSCRIPTION_SCOPE"
 echo
 
@@ -94,6 +110,11 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
     echo "  🚪 Azure Front Door found..."
   else
     echo "  🚪 Azure Front Door $AFD_NAME in Resource Group $RESOURCE_GROUP..."
+  fi
+
+  if [ $NOTIFY == 1 ]; then
+    bash ./notify.sh \
+      -t "🚪 Azure Front Door \`$AFD_NAME\` in Resource Group \`$RESOURCE_GROUP\`..."
   fi
 
   # Grab all the custom domains attached to the Azure Front Door
@@ -119,7 +140,12 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
   )
 
   if [ -z "$DOMAINS" ]; then
-    echo "     ✅ No domains were found that need revalidating"
+    echo "     ✅ No custom domains for this Front Door. Skipping..."
+
+    if [ $NOTIFY == 1 ]; then
+      bash ./notify.sh \
+        -t "  ✅ No custom domains for this Front Door. Skipping..."
+    fi
   else
     for DOMAIN in $(echo "$DOMAINS" | jq -c); do
       DOMAIN_NAME=$(echo "$DOMAIN" | jq -rc '.domain')
@@ -165,10 +191,20 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
         else
           echo "           Existing validation token is still valid."
         fi
+      else
+        if [ $NOTIFY == 1 ]; then
+          bash ./notify.sh \
+            -t "✅ $DOMAIN_NAME is still valid"
+        fi
       fi
 
       # Second check of State due to potential resource refreshed
       if [ "$STATE" == "Pending" ]; then
+        if [ $NOTIFY == 1 ]; then
+          bash ./notify.sh \
+            -t ":warning: $DOMAIN_NAME is pending revalidation..."
+        fi
+
         # Grab the new or existing token
         DOMAIN_TOKEN=$(echo "$DOMAIN" | jq -rc '.validationProperties.validationToken')
 
@@ -221,6 +257,11 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
 
           echo
           echo "           ✅  DNS Record update: $RECORD_SET_STATE"
+
+          if [ $NOTIFY == 1 ]; then
+            bash ./notify.sh \
+              -t "✅ \`_dnsauth\` TXT record was updated to \`$DOMAIN_TOKEN\`"
+          fi
         else
           echo "           ✅  Your DNS Record has already been updated. Nothing to do."
         fi
@@ -229,3 +270,8 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
   fi
   echo
 done
+
+if [ $NOTIFY == 1 ]; then
+  bash ./notify.sh \
+    -t "Finished"
+fi
