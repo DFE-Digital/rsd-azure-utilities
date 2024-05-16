@@ -27,3 +27,9 @@ variable "tfvars_filename" {
   description = "tfvars filename. This file is uploaded and stored encrypted within Key Vault, to ensure that the latest tfvars are stored in a shared place."
   type        = string
 }
+variable "slack_webhook_url" {
+  description = "A Slack Webhook URL that the script can route messages to"
+  sensitive   = true
+  type        = string
+  default     = ""
+}

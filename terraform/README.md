@@ -44,6 +44,7 @@
 | <a name="input_registry_password"></a> [registry\_password](#input\_registry\_password) | Password for authenticating to the Container Registry | `string` | n/a | yes |
 | <a name="input_registry_server"></a> [registry\_server](#input\_registry\_server) | Hostname of the Container Registry | `string` | n/a | yes |
 | <a name="input_registry_username"></a> [registry\_username](#input\_registry\_username) | Username for authenticating to the Container Registry | `string` | n/a | yes |
+| <a name="input_slack_webhook_url"></a> [slack\_webhook\_url](#input\_slack\_webhook\_url) | A Slack Webhook URL that the script can route messages to | `string` | `""` | no |
 | <a name="input_tags"></a> [tags](#input\_tags) | Tags to assign to the resources | `map(string)` | `{}` | no |
 | <a name="input_tfvars_filename"></a> [tfvars\_filename](#input\_tfvars\_filename) | tfvars filename. This file is uploaded and stored encrypted within Key Vault, to ensure that the latest tfvars are stored in a shared place. | `string` | n/a | yes |
 
