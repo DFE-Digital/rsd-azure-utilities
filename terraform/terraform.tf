@@ -52,7 +52,7 @@ resource "azurerm_container_group" "default" {
   }
 
   exposed_port   = []
-  restart_policy = "OnFailure"
+  restart_policy = "Never"
   subnet_ids     = [azurerm_subnet.default.id]
 
   tags = local.tags
