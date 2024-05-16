@@ -8,10 +8,6 @@ echo "Attempting to login..."
 az login --identity
 
 echo "Beginning job..."
-while :
-do
-  bash /afd-domain-scan.sh
-  echo
-  echo "Going to sleep for 4 hours.."
-  sleep 144100 # 4 hours
-done
+bash /afd-domain-scan.sh
+
+exit
