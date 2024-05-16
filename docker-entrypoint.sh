@@ -5,8 +5,6 @@ set -o pipefail
 
 # Check connectivity
 echo "Checking connectivity..."
-apt-get update
-apt install dnsutils
 nslookup login.microsoftonline.com
 
 # Log in with Azure Identity
