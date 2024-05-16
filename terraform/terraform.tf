@@ -36,11 +36,8 @@ resource "azurerm_container_group" "default" {
 
     environment_variables = {
       "AZ_SUBSCRIPTION_SCOPE" = data.azurerm_subscription.current.display_name
+      "SLACK_WEBHOOK_URL"     = local.slack_webhook_url
     }
-
-    secure_environment_variables = length(local.slack_webhook_url) > 0 ? {
-      "SLACK_WEBHOOK_URL" = local.slack_webhook_url
-    } : {}
   }
 
   image_registry_credential {
