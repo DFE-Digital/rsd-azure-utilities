@@ -14,11 +14,5 @@ locals {
   virtual_network_address_space_mask = element(split("/", local.virtual_network_address_space), 1)
   container_apps_infra_subnet_cidr   = cidrsubnet(local.virtual_network_address_space, 21 - local.virtual_network_address_space_mask, 0)
 
-  tags = {
-    "Environment"      = "Dev"
-    "Product"          = "Complete Conversions, Transfers and Changes"
-    "Service Offering" = "Complete Conversions, Transfers and Changes"
-    "GitHub"           = "rsd-afd-custom-domain-validator"
-    "Service Name"     = "RSD Front Door TLS Renewal"
-  }
+  tags = var.tags
 }
