@@ -82,7 +82,7 @@ jobs:
 
   deploy:
     name: Deploy new image
-    needs: [ acr-import ]
+    needs: [ set-env, acr-import ]
     runs-on: ubuntu-22.04
     environment: ${{ needs.set-env.outputs.environment }}
     steps:
