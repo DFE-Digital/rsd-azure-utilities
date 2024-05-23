@@ -5,10 +5,12 @@ variable "registry_server" {
 variable "registry_username" {
   description = "Username for authenticating to the Container Registry"
   type        = string
+  default     = ""
 }
 variable "registry_password" {
   description = "Password for authenticating to the Container Registry"
   type        = string
+  default     = ""
 }
 variable "tags" {
   description = "Tags to assign to the resources"
