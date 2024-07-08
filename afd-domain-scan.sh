@@ -15,7 +15,7 @@ fi
 # Author:
 #   Ash Davies <@DrizzlyOwl>
 # Version:
-#   0.1.1
+#   0.2.0
 # Description:
 #   Search an Azure Subscription for Azure Front Door Custom Domains that are
 #   secured using Azure Managed TLS Certificates. If the Custom Domain is in a
@@ -43,6 +43,54 @@ while getopts "s:q" opt; do
   esac
 done
 
+# Set up a handy log output function
+#
+# @usage print -l 'Something happened :)'"
+# @param -l <log>  Any information to output
+# @param -e <0/1>  Message is an error
+# @param -q <0/1>  Quiet mode
+function print {
+  OPTIND=1
+  QUIET_MODE=0
+  ERROR=0
+  while getopts "l:q:e:" opt; do
+    case $opt in
+      l)
+        LOG="$OPTARG"
+        ;;
+      q)
+        QUIET_MODE="$OPTARG"
+        ;;
+      e)
+        ERROR="$OPTARG"
+        ;;
+      *)
+        exit 1
+        ;;
+    esac
+  done
+
+  if [ "$QUIET_MODE" == "0" ]; then
+    if [ "$ERROR" == "1" ]; then
+      echo "[!] $LOG" >&2
+    else
+      echo "$LOG"
+    fi
+  fi
+}
+
+# Entered a dead-end without user input
+if [ $SILENT == 1 ] && [ -z "${AZ_SUBSCRIPTION_SCOPE}" ]; then
+  print -l "You must specify the Subscription ID or Name when using the silent switch" -e 1 -q 0
+
+  if [ $NOTIFY == 1 ]; then
+    bash ./notify.sh \
+      -t "Error: Silent switch is used but no Subscription scope was specified. Unable to continue"
+  fi
+
+  exit 1
+fi
+
 # If a subscription scope has not been defined on the command line using '-e'
 # then prompt the user to select a subscription from the account
 if [ -z "${AZ_SUBSCRIPTION_SCOPE}" ]; then
@@ -51,7 +99,7 @@ if [ -z "${AZ_SUBSCRIPTION_SCOPE}" ]; then
     jq -c '[.[] | select(.state == "Enabled").name]'
   )
 
-  echo "🌐 Choose an option"
+  print -l "Choose an option: " -e 0 -q 0
   AZ_SUBSCRIPTIONS="$(echo "$AZ_SUBSCRIPTIONS" | jq -r '. | join(",")')"
 
   # Read from the list of available subscriptions and prompt them to the user
@@ -81,18 +129,10 @@ fi
 
 if [ $NOTIFY == 1 ]; then
   bash ./notify.sh \
-    -t "🎯 *Scheduled task started in \`$AZ_SUBSCRIPTION_SCOPE\`*" \
-    -l ":lock: AFD Domain Validation Renewal" \
-    -d "_Any custom domains attached to an Azure Front Door that are pending revalidation will have the DNS records updated so that Azure-managed TLS Certificates can be renewed automatically_"
-
-  bash ./notify.sh \
-    -t "🔎 Looking for Azure Front Door CDNs..."
+    -t "🎯 *AFD Domain Validation Renewal task started in \`$AZ_SUBSCRIPTION_SCOPE\`*"
 fi
 
-echo "🎯 Using subscription $AZ_SUBSCRIPTION_SCOPE"
-echo
-
-echo "🔎 Looking for Azure Front Door CDNs..."
+print -l "Subscription: $AZ_SUBSCRIPTION_SCOPE" -q 0 -e 0
 
 # Find all Azure Front Doors within the specified subscription
 AFD_LIST=$(
@@ -102,20 +142,19 @@ AFD_LIST=$(
   jq -rc '.[] | { "name": .name, "resourceGroup": .resourceGroup }'
 )
 
+LAST_PROCESSED_RESOURCE_GROUP=""
+COUNT_ACTIONED=0
+COUNT_DISMISSED=0
+
 for AZURE_FRONT_DOOR in $AFD_LIST; do
   RESOURCE_GROUP=$(echo "$AZURE_FRONT_DOOR" | jq -rc '.resourceGroup')
   AFD_NAME=$(echo "$AZURE_FRONT_DOOR" | jq -rc '.name')
 
-  if [ $SILENT == 1 ]; then
-    echo "  🚪 Azure Front Door found..."
-  else
-    echo "  🚪 Azure Front Door $AFD_NAME in Resource Group $RESOURCE_GROUP..."
+  if [ "$LAST_PROCESSED_RESOURCE_GROUP" != "$RESOURCE_GROUP" ]; then
+    print -l "Resource Group: $RESOURCE_GROUP" -q $SILENT -e 0
   fi
 
-  if [ $NOTIFY == 1 ]; then
-    bash ./notify.sh \
-      -t "🚪 Azure Front Door \`$AFD_NAME\` in Resource Group \`$RESOURCE_GROUP\`..."
-  fi
+  print -l "Azure Front Door: $AFD_NAME" -q $SILENT -e 0
 
   # Grab all the custom domains attached to the Azure Front Door
   ALL_CUSTOM_DOMAINS=$(
@@ -139,14 +178,9 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
     }'
   )
 
-  if [ -z "$DOMAINS" ]; then
-    echo "     ✅ No custom domains for this Front Door. Skipping..."
+  if [ "$DOMAINS" ]; then
+    SKIP=0
 
-    if [ $NOTIFY == 1 ]; then
-      bash ./notify.sh \
-        -t "  ✅ No custom domains for this Front Door. Skipping..."
-    fi
-  else
     for DOMAIN in $(echo "$DOMAINS" | jq -c); do
       DOMAIN_NAME=$(echo "$DOMAIN" | jq -rc '.domain')
       RESOURCE_ID=$(echo "$DOMAIN" | jq -rc '.id')
@@ -155,26 +189,23 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
       DOMAIN_TOKEN=$(echo "$DOMAIN" | jq -rc '.validationProperties.validationToken')
       DOMAIN_DNS_ZONE_ID=$(echo "$DOMAIN" | jq -rc '.azureDnsZone.id')
 
-      if [ $SILENT == 1 ]; then
-        echo "     🌐 Found a domain with $STATE state"
-      else
-        echo "     🌐 $DOMAIN_NAME = $STATE"
-      fi
+      print -l "Domain name: $DOMAIN_NAME  |  State: $STATE" -q $SILENT -e 0
 
       if [ "$STATE" == "Pending" ] || [ "$STATE" == "PendingRevalidation" ]; then
+        print -l "Domain validation is in a Pending state" -q $SILENT -e 0
+
         # Check expiry of existing token
         DOMAIN_VALIDATION_EXPIRY_DATE=${DOMAIN_VALIDATION_EXPIRY:0:10}
         DOMAIN_VALIDATION_EXPIRY_DATE_COMP=${DOMAIN_VALIDATION_EXPIRY_DATE//-/}
         TODAY_COMP=${TODAY//-/}
 
-        echo "           Checking whether we can use the current validation token..."
-        echo "           ⏲️  Token $DOMAIN_TOKEN expires on $DOMAIN_VALIDATION_EXPIRY_DATE"
+        print -l "Token $DOMAIN_TOKEN expires on $DOMAIN_VALIDATION_EXPIRY_DATE" -q $SILENT -e 0
 
         if [[ "$DOMAIN_VALIDATION_EXPIRY_DATE_COMP" < "$TODAY_COMP" ]]; then
-          echo "           Existing validation token has expired."
+          print -l "Existing validation token has expired" -q $SILENT -e 1
+          print -l "A new validation token will be requested from Front Door" -q $SILENT -e 0
 
           # Regenerate token
-          echo "           Please wait whilst a new validation token is generated..."
           az afd custom-domain regenerate-validation-token \
             --ids "$RESOURCE_ID" \
             --output json
@@ -189,17 +220,18 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
 
           STATE=$(echo "$DOMAIN" | jq -rc '.domainValidationState')
         else
-          echo "           Existing validation token is still valid."
+          print -l "Existing validation token is still valid and can be re-used" -q $SILENT -e 0
         fi
+
+        ((COUNT_ACTIONED++))
+        SKIP=0
       else
-        if [ $NOTIFY == 1 ]; then
-          bash ./notify.sh \
-            -t "✅ $DOMAIN_NAME is still valid"
-        fi
+        ((COUNT_DISMISSED++))
+        SKIP=1
       fi
 
       # Second check of State due to potential resource refreshed
-      if [ "$STATE" == "Pending" ]; then
+      if [ "$STATE" == "Pending" ] && [ "$SKIP" == "0" ]; then
         if [ $NOTIFY == 1 ]; then
           bash ./notify.sh \
             -t ":warning: $DOMAIN_NAME is pending revalidation..."
@@ -235,13 +267,11 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
           jq -rc '.TXTRecords[0].value[0]'
         )
 
-        echo "           Checking DNS Record for validation token"
-        echo "           - Old value: $RECORD_SET_CURRENT_TOKEN"
-        echo "           + New value: $DOMAIN_TOKEN"
-        echo
+        print -l "Existing DNS TXT Record: $RECORD_SET_CURRENT_TOKEN" -q $SILENT -e 0
 
         if [ "$RECORD_SET_CURRENT_TOKEN" != "$DOMAIN_TOKEN" ]; then
-          echo "           Your DNS TXT Record will be automatically updated."
+          print -l "Expected DNS TXT Record: $DOMAIN_TOKEN" -q $SILENT -e 0
+          print -l "DNS TXT Record will be automatically updated" -q $SILENT -e 0
 
           # Update the DNS record with the validation token
           RECORD_SET_STATE=$(
@@ -255,23 +285,27 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
             jq -rc '.provisioningState'
           )
 
-          echo
-          echo "           ✅  DNS Record update: $RECORD_SET_STATE"
+          print -l "Set new DNS TXT Record request status: $RECORD_SET_STATE" -q $SILENT -e 0
 
           if [ $NOTIFY == 1 ]; then
             bash ./notify.sh \
-              -t "✅ \`_dnsauth\` TXT record was updated to \`$DOMAIN_TOKEN\`"
+              -t "✅ DNS TXT record for $DOMAIN_NAME was updated to \`$DOMAIN_TOKEN\`"
           fi
         else
-          echo "           ✅  Your DNS Record has already been updated. Nothing to do."
+          print -l "DNS TXT Record is still valid" -q $SILENT -e 0
         fi
       fi
     done
+  else
+    print -l "No domains found" -q $SILENT -e 0
   fi
-  echo
+
+  LAST_PROCESSED_RESOURCE_GROUP=$RESOURCE_GROUP
 done
+
+print -l "Finished execution. $COUNT_ACTIONED domains were updated. $COUNT_DISMISSED domains were valid" -q 0 -e 0
 
 if [ $NOTIFY == 1 ]; then
   bash ./notify.sh \
-    -t "Finished"
+    -t "Finished execution. $COUNT_ACTIONED domains were updated. $COUNT_DISMISSED domains were valid"
 fi
