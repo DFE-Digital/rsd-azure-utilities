@@ -223,10 +223,10 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
           print -l "Existing validation token is still valid and can be re-used" -q $SILENT -e 0
         fi
 
-        ((COUNT_ACTIONED++))
+        COUNT_ACTIONED=$((COUNT_ACTIONED+1))
         SKIP=0
       else
-        ((COUNT_DISMISSED++))
+        COUNT_DISMISSED=$((COUNT_DISMISSED+1))
         SKIP=1
       fi
 
