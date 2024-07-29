@@ -127,3 +127,27 @@ resource "azurerm_user_assigned_identity" "default" {
 
   tags = local.tags
 }
+
+resource "azurerm_logic_app_workflow" "logicapp" {
+  name                = local.resource_prefix
+  location            = azurerm_resource_group.default.location
+  resource_group_name = azurerm_resource_group.default.name
+
+  tags = local.tags
+}
+
+resource "azurerm_monitor_diagnostic_setting" "logicapp" {
+  name                       = local.resource_prefix
+  target_resource_id         = azurerm_logic_app_workflow.logicapp.id
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.default.id
+
+  enabled_log {
+    category = "WorkflowRuntime"
+  }
+
+  # The below metrics are kept in to avoid a diff in the Terraform Plan output
+  metric {
+    category = "AllMetrics"
+    enabled  = false
+  }
+}
