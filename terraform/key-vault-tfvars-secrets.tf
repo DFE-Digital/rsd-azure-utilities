@@ -9,7 +9,8 @@ module "azurerm_key_vault" {
   key_vault_access_users                  = []
   key_vault_access_ipv4                   = local.key_vault_access_ipv4
   tfvars_filename                         = local.tfvars_filename
-  enable_diagnostic_setting               = false
+  enable_diagnostic_setting               = true
+  diagnostic_log_analytics_workspace_id   = azurerm_log_analytics_workspace.default.id
   enable_diagnostic_storage_account       = false
   tags                                    = local.tags
 }
