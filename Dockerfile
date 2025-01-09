@@ -1,8 +1,6 @@
 FROM mcr.microsoft.com/azure-cli
 LABEL org.opencontainers.image.source=https://github.com/DFE-Digital/rsd-afd-custom-domain-validator
 
-RUN apk add curl
-
 COPY afd-domain-scan.sh /
 RUN chmod +x /afd-domain-scan.sh
 
