@@ -62,7 +62,7 @@ resource "azapi_update_resource" "patch_logs" {
   type        = "Microsoft.ContainerInstance/containerGroups@2023-05-01"
   resource_id = azurerm_container_group.default.id
 
-  body = jsonencode({
+  body = {
     properties = {
       diagnostics : {
         logAnalytics : {
@@ -78,7 +78,7 @@ resource "azapi_update_resource" "patch_logs" {
         }
       ]
     }
-  })
+  }
 }
 
 resource "azurerm_virtual_network" "default" {
@@ -94,7 +94,7 @@ resource "azurerm_route_table" "default" {
   name                          = "${local.resource_prefix}default"
   location                      = azurerm_resource_group.default.location
   resource_group_name           = azurerm_resource_group.default.name
-  disable_bgp_route_propagation = false
+  bgp_route_propagation_enabled = true
 
   tags = local.tags
 }
