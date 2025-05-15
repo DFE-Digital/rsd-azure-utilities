@@ -63,10 +63,12 @@ jobs:
           AZURE_SUBSCRIPTION: ${{ secrets.AZURE_SUBSCRIPTION_ID || '' }}
           AZURE_ACR_CLIENT_ID: ${{ secrets.ACR_CLIENT_ID || '' }}
 
-      - name: Azure login with ACI credentials
+      - name: Login with OIDC
         uses: azure/login@v2
         with:
-          creds: ${{ secrets.ACI_CREDENTIALS }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ secrets.ACI_CLIENT_ID }}
 
       - name: Restart Container
         uses: azure/cli@v2
