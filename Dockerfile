@@ -1,12 +1,18 @@
-FROM mcr.microsoft.com/azure-cli
-LABEL org.opencontainers.image.source=https://github.com/DFE-Digital/rsd-afd-custom-domain-validator
+FROM mcr.microsoft.com/azure-cli:azurelinux3.0
+LABEL org.opencontainers.image.source="https://github.com/DFE-Digital/rsd-azure-utilities"
+LABEL org.opencontainers.image.description="Azure CLI image for running automation tools"
+LABEL org.opencontainers.image.licenses="MIT"
+LABEL org.opencontainers.image.authors="Department for Education"
 
-COPY afd-domain-scan.sh /
-RUN chmod +x /afd-domain-scan.sh
+RUN mkdir -p ./bin ./support
+COPY bin/ /home/nonroot/bin
+COPY support/ /home/nonroot/support
+COPY docker-entrypoint.sh /home/nonroot/docker-entrypoint.sh
 
-COPY docker-entrypoint.sh /
-RUN chmod +x /docker-entrypoint.sh
+RUN chmod +x /home/nonroot/bin/* /home/nonroot/support* \
+    && chmod +x /home/nonroot/docker-entrypoint.sh \
+    && chown -R nonroot:nonroot /home/nonroot
 
-COPY notify.sh /
-COPY slack-webhook.json /
-RUN chmod +x /notify.sh
+USER nonroot
+WORKDIR /home/nonroot
+ENV PATH="/home/nonroot/bin:$PATH"

@@ -3,11 +3,10 @@
 set -e
 set -o pipefail
 
-# Log in with Azure Identity
-echo "Attempting to login..."
 az login --identity
+az account set --subscription "$AZ_SUBSCRIPTION_SCOPE"
 
-echo "Beginning job..."
-bash /afd-domain-scan.sh
+exec "$@"
 
-exit
+exit 0
+# If the script reaches this point, it means the job was successful

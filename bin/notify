@@ -2,6 +2,9 @@
 set -e
 set -o pipefail
 
+APP_ROOT="$( cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd -P)"
+export APP_ROOT
+
 ################################################################################
 # Author:
 #   Ash Davies <@DrizzlyOwl>
@@ -78,7 +81,7 @@ if [ "${DESCRIPTION}" ]; then
     '.attachments[0].color = $color |
     .attachments[0].blocks[0].text.text = $label |
     .attachments[0].blocks[1].text.text = $desc |
-    .text = $text' ./slack-webhook.json > final.json
+    .text = $text' ../support/slack-webhook.json > final.json
 fi
 
 if [ $MORE_FIELDS == 1 ]; then
