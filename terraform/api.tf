@@ -1,5 +1,5 @@
 resource "azurerm_api_connection" "linkedservice" {
-  count = (local.api_connection_client_id != "" && local.api_connection_client_secret != "") ? 1 : 0
+  count = local.api_connection_client_id != "" ? 1 : 0
 
   name                = "aci"
   resource_group_name = azurerm_resource_group.default.name
@@ -8,7 +8,7 @@ resource "azurerm_api_connection" "linkedservice" {
 
   parameter_values = {
     "token:clientId" : local.api_connection_client_id,
-    "token:clientSecret" : local.api_connection_client_secret,
+    "token:clientSecret" : azuread_application_password.aci_service_principal[0].value,
     "token:TenantId" : data.azurerm_subscription.current.tenant_id,
     "token:grantType" : "client_credentials"
   }
@@ -21,4 +21,26 @@ resource "azurerm_api_connection" "linkedservice" {
   }
 
   tags = local.tags
+}
+
+resource "azuread_application_password" "aci_service_principal" {
+  count = local.api_connection_client_id != "" ? 1 : 0
+
+  display_name   = local.resource_prefix
+  application_id = data.azuread_application.aci_service_principal[0].id
+
+  end_date = timeadd(
+    time_rotating.annual[0].rotation_rfc3339,
+    "2160h" # +90 days from the 'time_rotating' resource
+  )
+
+  rotate_when_changed = {
+    rotation = time_rotating.annual[0].id
+  }
+}
+
+resource "time_rotating" "annual" {
+  count = local.api_connection_client_id != "" ? 1 : 0
+
+  rotation_days = 365
 }

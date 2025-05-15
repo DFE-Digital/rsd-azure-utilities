@@ -1,13 +1,10 @@
 locals {
   region                             = "westeurope"
   environment                        = var.environment
-  project_name                       = "afd-domain-renewal"
+  project_name                       = "rsd-utilities"
   resource_prefix                    = "${local.environment}${local.project_name}"
   registry_server                    = var.registry_server
-  registry_username                  = var.registry_username
-  registry_password                  = var.registry_password
-  registry_image_name                = "rsd-afd-custom-domain-validator"
-  registry_image_tag                 = "latest"
+  container_jobs                     = var.container_jobs
   job_cpu                            = 0.5
   job_memory                         = 1
   virtual_network_address_space      = "172.16.0.0/12"
@@ -17,6 +14,5 @@ locals {
   tfvars_filename                    = var.tfvars_filename
   slack_webhook_url                  = var.slack_webhook_url
   api_connection_client_id           = var.api_connection_client_id
-  api_connection_client_secret       = var.api_connection_client_secret
   tags                               = var.tags
 }

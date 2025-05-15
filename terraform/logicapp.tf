@@ -1,5 +1,5 @@
 resource "azurerm_logic_app_workflow" "logicapp" {
-  count = (local.api_connection_client_id != "" && local.api_connection_client_secret != "") ? 1 : 0
+  count = local.api_connection_client_id != "" ? 1 : 0
 
   name                = local.resource_prefix
   location            = azurerm_resource_group.default.location
@@ -22,7 +22,7 @@ resource "azurerm_logic_app_workflow" "logicapp" {
 }
 
 resource "azurerm_monitor_diagnostic_setting" "logicapp" {
-  count = (local.api_connection_client_id != "" && local.api_connection_client_secret != "") ? 1 : 0
+  count = local.api_connection_client_id != "" ? 1 : 0
 
   name                       = local.resource_prefix
   target_resource_id         = azurerm_logic_app_workflow.logicapp[0].id
@@ -40,7 +40,7 @@ resource "azurerm_monitor_diagnostic_setting" "logicapp" {
 }
 
 resource "azurerm_logic_app_trigger_recurrence" "start" {
-  count = (local.api_connection_client_id != "" && local.api_connection_client_secret != "") ? 1 : 0
+  count = local.api_connection_client_id != "" ? 1 : 0
 
   name         = "scheduled-start"
   time_zone    = "W. Europe Standard Time"
@@ -55,6 +55,8 @@ resource "azurerm_logic_app_trigger_recurrence" "start" {
 }
 
 resource "azurerm_logic_app_action_custom" "start" {
+  count = local.api_connection_client_id != "" ? 1 : 0
+
   name         = "start-aci"
   logic_app_id = azurerm_logic_app_workflow.logicapp[0].id
 

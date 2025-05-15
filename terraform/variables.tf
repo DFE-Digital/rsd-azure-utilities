@@ -24,18 +24,6 @@ variable "registry_server" {
   type        = string
 }
 
-variable "registry_username" {
-  description = "Username for authenticating to the Container Registry"
-  type        = string
-  default     = ""
-}
-
-variable "registry_password" {
-  description = "Password for authenticating to the Container Registry"
-  type        = string
-  default     = ""
-}
-
 variable "tags" {
   description = "Tags to assign to the resources"
   type        = map(string)
@@ -70,9 +58,12 @@ variable "api_connection_client_id" {
   default     = ""
 }
 
-variable "api_connection_client_secret" {
-  description = "Service Principal Client Secret used for authenticating with the Container Instance"
-  type        = string
-  default     = ""
-  sensitive   = true
+variable "container_jobs" {
+  description = "List of container jobs to be created"
+  type = map(object({
+    image_name = string
+    image_tag  = string
+    script     = string
+  }))
+  default = {}
 }
