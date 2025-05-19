@@ -1,24 +1,10 @@
 #! /bin/bash
-set -e
-
-APP_ROOT="$( cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd -P)"
-export APP_ROOT
-
-TODAY=$(date -Idate)
-TZ=Europe/London
-SILENT=0
-
-NOTIFY=1
-
-if [ -z "$SLACK_WEBHOOK_URL" ]; then
-  NOTIFY=0
-fi
 
 ################################################################################
 # Author:
 #   Ash Davies <@DrizzlyOwl>
 # Version:
-#   0.2.0
+#   1.0.0
 # Description:
 #   Search an Azure Subscription for Azure Front Door Custom Domains that are
 #   secured using Azure Managed TLS Certificates. If the Custom Domain is in a
@@ -33,6 +19,10 @@ fi
 #   select one based on the current logged in Azure user
 ################################################################################
 
+set -e
+
+SILENT=0
+
 while getopts "s:q" opt; do
   case $opt in
     s)
@@ -46,47 +36,11 @@ while getopts "s:q" opt; do
   esac
 done
 
-# Set up a handy log output function
-#
-# @usage print -l 'Something happened :)'"
-# @param -l <log>  Any information to output
-# @param -e <0/1>  Message is an error
-# @param -q <0/1>  Quiet mode
-function print {
-  OPTIND=1
-  QUIET_MODE=0
-  ERROR=0
-  while getopts "l:q:e:" opt; do
-    case $opt in
-      l)
-        LOG="$OPTARG"
-        ;;
-      q)
-        QUIET_MODE="$OPTARG"
-        ;;
-      e)
-        ERROR="$OPTARG"
-        ;;
-      *)
-        exit 1
-        ;;
-    esac
-  done
-
-  if [ "$QUIET_MODE" == "0" ]; then
-    if [ "$ERROR" == "1" ]; then
-      echo "[!] $LOG" >&2
-    else
-      echo "$LOG"
-    fi
-  fi
-}
-
 # Entered a dead-end without user input
-if [ $SILENT == 1 ] && [ -z "${AZ_SUBSCRIPTION_SCOPE}" ]; then
-  print -l "You must specify the Subscription ID or Name when using the silent switch" -e 1 -q 0
+if [ "$SILENT" == 1 ] && [ -z "$AZ_SUBSCRIPTION_SCOPE" ]; then
+  print "ERROR" "You must specify the Subscription ID or Name when using the silent switch"
 
-  if [ $NOTIFY == 1 ]; then
+  if [ "$NOTIFY" == 1 ]; then
     bash "$APP_ROOT/bin/notify" \
       -t "Error: Silent switch is used but no Subscription scope was specified. Unable to continue"
   fi
@@ -102,7 +56,8 @@ if [ -z "${AZ_SUBSCRIPTION_SCOPE}" ]; then
     jq -c '[.[] | select(.state == "Enabled").name]'
   )
 
-  print -l "Choose an option: " -e 0 -q 0
+  print "INFO" "Choose an option: "
+
   AZ_SUBSCRIPTIONS="$(echo "$AZ_SUBSCRIPTIONS" | jq -r '. | join(",")')"
 
   # Read from the list of available subscriptions and prompt them to the user
@@ -135,7 +90,7 @@ if [ $NOTIFY == 1 ]; then
     -t "🎯 *AFD Domain Validation Renewal task started in \`$AZ_SUBSCRIPTION_SCOPE\`*"
 fi
 
-print -l "Subscription: $AZ_SUBSCRIPTION_SCOPE" -q 0 -e 0
+print "INFO" "Subscription: $AZ_SUBSCRIPTION_SCOPE"
 
 # Find all Azure Front Doors within the specified subscription
 AFD_LIST=$(
@@ -154,10 +109,10 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
   AFD_NAME=$(echo "$AZURE_FRONT_DOOR" | jq -rc '.name')
 
   if [ "$LAST_PROCESSED_RESOURCE_GROUP" != "$RESOURCE_GROUP" ]; then
-    print -l "Resource Group: $RESOURCE_GROUP" -q $SILENT -e 0
+    print "INFO" "Resource Group: $RESOURCE_GROUP" "$SILENT"
   fi
 
-  print -l "Azure Front Door: $AFD_NAME" -q $SILENT -e 0
+  print "INFO" "Azure Front Door: $AFD_NAME" "$SILENT"
 
   # Grab all the custom domains attached to the Azure Front Door
   ALL_CUSTOM_DOMAINS=$(
@@ -192,21 +147,21 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
       DOMAIN_TOKEN=$(echo "$DOMAIN" | jq -rc '.validationProperties.validationToken')
       DOMAIN_DNS_ZONE_ID=$(echo "$DOMAIN" | jq -rc '.azureDnsZone.id')
 
-      print -l "Domain name: $DOMAIN_NAME  |  State: $STATE" -q $SILENT -e 0
+      print "INFO" "Domain name: $DOMAIN_NAME  |  State: $STATE" "$SILENT"
 
       if [ "$STATE" == "Pending" ] || [ "$STATE" == "PendingRevalidation" ]; then
-        print -l "Domain validation is in a Pending state" -q $SILENT -e 0
+        print "INFO" "Domain validation is in a Pending state" "$SILENT"
 
         # Check expiry of existing token
         DOMAIN_VALIDATION_EXPIRY_DATE=${DOMAIN_VALIDATION_EXPIRY:0:10}
         DOMAIN_VALIDATION_EXPIRY_DATE_COMP=${DOMAIN_VALIDATION_EXPIRY_DATE//-/}
         TODAY_COMP=${TODAY//-/}
 
-        print -l "Token $DOMAIN_TOKEN expires on $DOMAIN_VALIDATION_EXPIRY_DATE" -q $SILENT -e 0
+        print "INFO" "Token $DOMAIN_TOKEN expires on $DOMAIN_VALIDATION_EXPIRY_DATE" "$SILENT"
 
         if [[ "$DOMAIN_VALIDATION_EXPIRY_DATE_COMP" < "$TODAY_COMP" ]]; then
-          print -l "Existing validation token has expired" -q $SILENT -e 1
-          print -l "A new validation token will be requested from Front Door" -q $SILENT -e 0
+          print "INFO" "Existing validation token has expired" "$SILENT"
+          print "INFO" "A new validation token will be requested from Front Door" "$SILENT"
 
           # Regenerate token
           az afd custom-domain regenerate-validation-token \
@@ -223,7 +178,7 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
 
           STATE=$(echo "$DOMAIN" | jq -rc '.domainValidationState')
         else
-          print -l "Existing validation token is still valid and can be re-used" -q $SILENT -e 0
+          print "INFO" "Existing validation token is still valid and can be re-used" "$SILENT"
         fi
 
         COUNT_ACTIONED=$((COUNT_ACTIONED+1))
@@ -270,11 +225,11 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
           jq -rc '.TXTRecords[0].value[0]'
         )
 
-        print -l "Existing DNS TXT Record: $RECORD_SET_CURRENT_TOKEN" -q $SILENT -e 0
+        print "INFO" "Existing DNS TXT Record: $RECORD_SET_CURRENT_TOKEN" "$SILENT"
 
         if [ "$RECORD_SET_CURRENT_TOKEN" != "$DOMAIN_TOKEN" ]; then
-          print -l "Expected DNS TXT Record: $DOMAIN_TOKEN" -q $SILENT -e 0
-          print -l "DNS TXT Record will be automatically updated" -q $SILENT -e 0
+          print "INFO" "Expected DNS TXT Record: $DOMAIN_TOKEN" "$SILENT"
+          print "INFO" "DNS TXT Record will be automatically updated" "$SILENT"
 
           # Update the DNS record with the validation token
           RECORD_SET_STATE=$(
@@ -288,25 +243,25 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
             jq -rc '.provisioningState'
           )
 
-          print -l "Set new DNS TXT Record request status: $RECORD_SET_STATE" -q $SILENT -e 0
+          print "INFO" "Set new DNS TXT Record request status: $RECORD_SET_STATE" "$SILENT"
 
           if [ $NOTIFY == 1 ]; then
             bash "$APP_ROOT/bin/notify" \
               -t "✅ DNS TXT record for $DOMAIN_NAME was updated to \`$DOMAIN_TOKEN\`"
           fi
         else
-          print -l "DNS TXT Record is still valid" -q $SILENT -e 0
+          print "INFO" "DNS TXT Record is still valid" "$SILENT"
         fi
       fi
     done
   else
-    print -l "No domains found" -q $SILENT -e 0
+    print "INFO" "No domains found" "$SILENT"
   fi
 
   LAST_PROCESSED_RESOURCE_GROUP=$RESOURCE_GROUP
 done
 
-print -l "Finished execution. $COUNT_ACTIONED domains were updated. $COUNT_DISMISSED domains were valid" -q 0 -e 0
+print "INFO" "Finished execution. $COUNT_ACTIONED domains were updated. $COUNT_DISMISSED domains were valid"
 
 if [ $NOTIFY == 1 ]; then
   bash "$APP_ROOT/bin/notify" \

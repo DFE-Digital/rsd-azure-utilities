@@ -1,0 +1,41 @@
+#!/bin/bash
+
+# /**
+#  * @brief Outputs a log message with a timestamp and specified level.
+#  *
+#  * This function takes a log level, a message, and an optional quiet flag.
+#  * It formats the output with a timestamp and the log level indicator.
+#  * Error messages are directed to standard error.
+#  *
+#  * @param level (string) The log level of the message.
+#  * Valid values are: "INFO", "WARNING", "ERROR".
+#  * If no level is provided, it defaults to "INFO".
+#  * @param message (string) The log message to be displayed.
+#  * @param quiet (optional, integer) A flag to suppress output.
+#  * Set to '1' to disable output, '0' (or omitted) to enable.
+#  *
+#  * @usage print "INFO" "Script started successfully."
+#  * @usage print "WARNING" "Approaching a critical threshold."
+#  * @usage print "ERROR" "Failed to connect to the server." 1
+#  */
+function print {
+  local level="$1"
+  local log="$2"
+  local quiet="${3:-0}"
+  local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
+  local script_base_name=$(basename "$0")
+
+  if [ "$quiet" == "0" ]; then
+    case "$level" in
+      "ERROR")
+        echo "$timestamp [ERROR] [$script_base_name] $log" >&2
+        ;;
+      "WARNING")
+        echo "$timestamp [WARNING] [$script_base_name] $log"
+        ;;
+      *) # Default to INFO
+        echo "$timestamp [INFO] [$script_base_name] $log"
+        ;;
+    esac
+  fi
+}

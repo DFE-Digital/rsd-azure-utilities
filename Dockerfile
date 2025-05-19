@@ -7,10 +7,10 @@ LABEL org.opencontainers.image.authors="Department for Education"
 RUN mkdir -p ./bin ./support
 COPY bin/ /home/nonroot/bin
 COPY support/ /home/nonroot/support
-COPY docker-entrypoint.sh /home/nonroot/docker-entrypoint.sh
+COPY start /home/nonroot/start
 
 RUN chmod +x /home/nonroot/bin/* /home/nonroot/support* \
-    && chmod +x /home/nonroot/docker-entrypoint.sh \
+    && chmod +x /home/nonroot/start \
     && chown -R nonroot:nonroot /home/nonroot
 
 USER nonroot

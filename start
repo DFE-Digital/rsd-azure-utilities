@@ -1,0 +1,81 @@
+#!/bin/bash
+# set -e
+# set -o pipefail
+
+APP_ROOT="$( cd "$(dirname "${BASH_SOURCE[0]}")"/ && pwd -P)"
+TODAY=$(date +"%Y-%m-%d")
+TZ=Europe/London
+
+BASH_FUNCTION_DIR="$APP_ROOT/bin/functions"
+for bash_function_file in "$BASH_FUNCTION_DIR"/*
+do
+  if [[ ! -f "$bash_function_file" ]]
+  then
+    continue
+  fi
+  # shellcheck source=/dev/null
+  source "$bash_function_file"
+  while IFS='' read -r function_name
+  do
+    export -f "${function_name?}"
+  done < <(grep "^function" "$bash_function_file" | cut -d" " -f2)
+done
+
+NOTIFY=1
+
+if [ -z "$SLACK_WEBHOOK_URL" ];
+then
+  print "WARNING" "No Slack Webhook URL defined. Output will only be available in stdout." "$SILENT"
+
+  NOTIFY=0
+fi
+
+if [[ "$AZURE_CLIENT_ID" && -z "$AZURE_CLIENT_SECRET" ]];
+then
+  print "INFO" "Using Managed Identity to authenticate with ARM." "$SILENT"
+
+  az login --identity
+  if [ $? -ne 0 ]; then
+    print "ERROR" "Azure MSI login failed."
+    exit 1
+  fi
+elif [[ "$AZURE_CLIENT_ID" && "$AZURE_CLIENT_SECRET" && "$AZURE_TENANT_ID" ]];
+then
+  print "WARNING" "Detected Client Credentials. Managed Identity (MSI) is the preferred method of authentication." "$SILENT"
+
+  az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID"
+  if [ $? -ne 0 ]; then
+    print "ERROR" "Azure service principal login failed."
+    exit 1
+  fi
+else
+  print "WARNING" "Unable to detect system credentials, falling back to local Azure CLI session." "$SILENT"
+
+  az login
+  if [ $? -ne 0 ]; then
+    print "ERROR" "Azure CLI login failed."
+    exit 1
+  fi
+fi
+
+if [ -z "$AZ_SUBSCRIPTION_SCOPE" ]; then
+  AZ_SUBSCRIPTION_SCOPE="$(az account show | jq -r '.name')"
+  print "WARNING" "Azure Subscription is not defined. Falling back to default: '$AZ_SUBSCRIPTION_SCOPE'"
+fi
+
+az account set --subscription "$AZ_SUBSCRIPTION_SCOPE"
+if [ $? -ne 0 ]; then
+  print "ERROR" "Failed to set Azure subscription to '$AZ_SUBSCRIPTION_SCOPE'."
+  exit 1
+fi
+
+export TODAY TZ
+export APP_ROOT
+export NOTIFY
+export AZ_SUBSCRIPTION_SCOPE
+export SLACK_WEBHOOK_URL
+
+exec "$@"
+
+exit 0
+# If the script reaches this point, it means the job was successful
