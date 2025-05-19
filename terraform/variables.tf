@@ -67,3 +67,12 @@ variable "container_jobs" {
   }))
   default = {}
 }
+
+variable "key_vault_targets" {
+  description = "List of Key Vault resource names and resource groups that you want the utilities containers to be able to access"
+  type = map(object({
+    name                = string
+    resource_group_name = string
+  }))
+  default = {}
+}

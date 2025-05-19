@@ -67,4 +67,8 @@ resource "azapi_update_resource" "patch_logs" {
       ]
     }
   }
+
+  lifecycle {
+    replace_triggered_by = [azurerm_log_analytics_workspace.default.workspace_id]
+  }
 }

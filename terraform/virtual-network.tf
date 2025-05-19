@@ -36,3 +36,13 @@ resource "azurerm_subnet_route_table_association" "container_apps_infra_subnet" 
   subnet_id      = azurerm_subnet.default.id
   route_table_id = azurerm_route_table.default.id
 }
+
+resource "azurerm_subnet" "kv_private_endpoint" {
+  count = length(local.key_vault_targets) > 0 ? 1 : 0
+
+  name                 = "${local.resource_prefix}keyvaultsinfra"
+  virtual_network_name = azurerm_virtual_network.default.name
+  resource_group_name  = azurerm_resource_group.default.name
+  address_prefixes     = [local.key_vault_subnet_cidr]
+  service_endpoints    = ["Microsoft.KeyVault"]
+}

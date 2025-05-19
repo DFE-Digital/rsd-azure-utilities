@@ -10,3 +10,10 @@ data "azuread_application" "aci_service_principal" {
 
   client_id = local.api_connection_client_id
 }
+
+data "azurerm_key_vault" "target_resource" {
+  for_each = local.key_vault_targets
+
+  name                = each.value["name"]
+  resource_group_name = each.value["resource_group_name"]
+}

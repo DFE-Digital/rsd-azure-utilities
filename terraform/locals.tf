@@ -14,5 +14,7 @@ locals {
   tfvars_filename                    = var.tfvars_filename
   slack_webhook_url                  = var.slack_webhook_url
   api_connection_client_id           = var.api_connection_client_id
+  key_vault_subnet_cidr              = cidrsubnet(local.virtual_network_address_space, 21 - local.virtual_network_address_space_mask, 2)
+  key_vault_targets                  = var.key_vault_targets
   tags                               = var.tags
 }
