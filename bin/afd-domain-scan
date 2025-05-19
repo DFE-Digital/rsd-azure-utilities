@@ -87,7 +87,7 @@ if [ $SILENT == 1 ] && [ -z "${AZ_SUBSCRIPTION_SCOPE}" ]; then
   print -l "You must specify the Subscription ID or Name when using the silent switch" -e 1 -q 0
 
   if [ $NOTIFY == 1 ]; then
-    bash "$APP_ROOT/bin/notify.sh" \
+    bash "$APP_ROOT/bin/notify" \
       -t "Error: Silent switch is used but no Subscription scope was specified. Unable to continue"
   fi
 
@@ -236,7 +236,7 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
       # Second check of State due to potential resource refreshed
       if [ "$STATE" == "Pending" ] && [ "$SKIP" == "0" ]; then
         if [ $NOTIFY == 1 ]; then
-          bash "$APP_ROOT/bin/notify.sh" \
+          bash "$APP_ROOT/bin/notify" \
             -t ":warning: $DOMAIN_NAME is pending revalidation..."
         fi
 
@@ -291,7 +291,7 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
           print -l "Set new DNS TXT Record request status: $RECORD_SET_STATE" -q $SILENT -e 0
 
           if [ $NOTIFY == 1 ]; then
-            bash "$APP_ROOT/bin/notify.sh" \
+            bash "$APP_ROOT/bin/notify" \
               -t "✅ DNS TXT record for $DOMAIN_NAME was updated to \`$DOMAIN_TOKEN\`"
           fi
         else
@@ -309,6 +309,6 @@ done
 print -l "Finished execution. $COUNT_ACTIONED domains were updated. $COUNT_DISMISSED domains were valid" -q 0 -e 0
 
 if [ $NOTIFY == 1 ]; then
-  bash "$APP_ROOT/bin/notify.sh" \
+  bash "$APP_ROOT/bin/notify" \
     -t "Finished execution. $COUNT_ACTIONED domains were updated. $COUNT_DISMISSED domains were valid"
 fi
