@@ -121,10 +121,20 @@ if [ $? -ne 0 ]; then
   print "ERROR" "Failed to set Azure subscription to '$AZ_SUBSCRIPTION_SCOPE'."
   exit 1
 else
-  print "DEBUG" "Azure subscription set to '$AZ_SUBSCRIPTION_SCOPE'."
+  print "DEBUG" "AZ_SUBSCRIPTION_SCOPE: '$AZ_SUBSCRIPTION_SCOPE'."
 fi
 
+if [ -z "$1" ]; then
+  print "ERROR" "No script to execute. Exiting."
+  exit 1
+else
+  print "DEBUG" "Executing script: '$1'."
 
+  if [ ! -f "$1" ]; then
+    print "ERROR" "Script '$1' not found. Exiting."
+    exit 1
+  fi
+fi
 
 exec "$@"
 
