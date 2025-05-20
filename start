@@ -3,7 +3,6 @@
 # set -o pipefail
 
 APP_ROOT="$( cd "$(dirname "${BASH_SOURCE[0]}")"/ && pwd -P)"
-TODAY=$(date +"%Y-%m-%d")
 TZ=Europe/London
 
 BASH_FUNCTION_DIR="$APP_ROOT/bin/functions"
