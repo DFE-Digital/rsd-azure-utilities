@@ -22,19 +22,18 @@ function print {
   local level="$1"
   local log="$2"
   local quiet="${3:-0}"
-  local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
   local script_base_name=$(basename "$0")
 
   if [ "$quiet" == "0" ]; then
     case "$level" in
       "ERROR")
-        echo "$timestamp [ERROR] [$script_base_name] $log" >&2
+        echo "[ERROR] [$script_base_name] $log" >&2
         ;;
       "WARNING")
-        echo "$timestamp [WARNING] [$script_base_name] $log"
+        echo "[WARNING] [$script_base_name] $log"
         ;;
       *) # Default to INFO
-        echo "$timestamp [INFO] [$script_base_name] $log"
+        echo "[INFO] [$script_base_name] $log"
         ;;
     esac
   fi
