@@ -31,26 +31,26 @@ fi
 
 if [[ "$AZURE_CLIENT_ID" && -z "$AZURE_CLIENT_SECRET" ]];
 then
-  print "INFO" "Using Managed Identity to authenticate with ARM." "$SILENT"
+  print "INFO" "Detected Client ID '$AZURE_CLIENT_ID'. Using MSI login." "$SILENT"
 
-  az login --identity
+  az login --identity --only-show-errors --output none
   if [ $? -ne 0 ]; then
     print "ERROR" "Azure MSI login failed."
     exit 1
   fi
 elif [[ "$AZURE_CLIENT_ID" && "$AZURE_CLIENT_SECRET" && "$AZURE_TENANT_ID" ]];
 then
-  print "WARNING" "Detected Client Credentials. Managed Identity (MSI) is the preferred method of authentication." "$SILENT"
+  print "WARNING" "Detected Client Credentials. Using service principal login." "$SILENT"
 
-  az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID"
+  az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID" --only-show-errors --output none
   if [ $? -ne 0 ]; then
     print "ERROR" "Azure service principal login failed."
     exit 1
   fi
 else
-  print "WARNING" "Unable to detect system credentials, falling back to local Azure CLI session." "$SILENT"
+  print "WARNING" "Unable to detect system credentials. Using interactive login." "$SILENT"
 
-  az login
+  az login --only-show-errors --output none
   if [ $? -ne 0 ]; then
     print "ERROR" "Azure CLI login failed."
     exit 1
@@ -62,13 +62,13 @@ if [ -z "$AZ_SUBSCRIPTION_SCOPE" ]; then
   print "WARNING" "Azure Subscription is not defined. Falling back to default: '$AZ_SUBSCRIPTION_SCOPE'"
 fi
 
-az account set --subscription "$AZ_SUBSCRIPTION_SCOPE"
+az account set --subscription "$AZ_SUBSCRIPTION_SCOPE" --only-show-errors --output none
 if [ $? -ne 0 ]; then
   print "ERROR" "Failed to set Azure subscription to '$AZ_SUBSCRIPTION_SCOPE'."
   exit 1
 fi
 
-export TODAY TZ
+export TZ
 export APP_ROOT
 export NOTIFY
 export AZ_SUBSCRIPTION_SCOPE

@@ -13,7 +13,7 @@ resource "azurerm_container_group" "default" {
       image    = "${local.registry_server}/${container.value.image_name}:${container.value.image_tag}"
       cpu      = local.job_cpu
       memory   = local.job_memory
-      commands = ["/bin/bash", "-c", "./docker-entrypoint.sh ${container.value.script}"]
+      commands = ["/bin/bash", "-c", "./start bin/${container.value.script}"]
 
       ports { # bogus
         port     = 65500 + index(keys(local.container_jobs), container.key)
