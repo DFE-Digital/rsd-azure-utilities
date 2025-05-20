@@ -45,13 +45,6 @@ variable "tfvars_filename" {
   type        = string
 }
 
-variable "slack_webhook_url" {
-  description = "A Slack Webhook URL that the script can route messages to"
-  sensitive   = true
-  type        = string
-  default     = ""
-}
-
 variable "api_connection_client_id" {
   description = "Service Principal Client ID used for authenticating with the Container Instance "
   type        = string
@@ -64,6 +57,7 @@ variable "container_jobs" {
     image_name = string
     image_tag  = string
     script     = string
+    env        = optional(map(string), {})
   }))
   default = {}
 }

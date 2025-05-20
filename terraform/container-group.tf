@@ -20,11 +20,10 @@ resource "azurerm_container_group" "default" {
         protocol = "TCP"
       }
 
-      environment_variables = {
+      environment_variables = merge({
         "AZURE_CLIENT_ID"       = azurerm_user_assigned_identity.default.client_id
         "AZ_SUBSCRIPTION_SCOPE" = data.azurerm_subscription.current.display_name
-        "SLACK_WEBHOOK_URL"     = local.slack_webhook_url
-      }
+      }, container.value.env)
     }
   }
 
