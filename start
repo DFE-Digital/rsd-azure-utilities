@@ -1,9 +1,38 @@
 #!/bin/bash
-# set -e
-# set -o pipefail
+set -e
+set -o pipefail
+
+# --- START Global Configuration ---
+# Set a default log level for the script.
+# Default is "INFO" if not set or invalid.
+# Valid values (case-insensitive): "INFO", "WARNING", "ERROR", "DEBUG"
+LOG_LEVEL=${LOG_LEVEL:-"DEBUG"}
+
+# Set the Slack Webhook URL for notifications.
+# If not set, notifications will only be printed to stdout.
+# Valid values: "<your_slack_webhook_url>"
+SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-""}
+# --- END Global Configuration ---
+
+
 
 APP_ROOT="$( cd "$(dirname "${BASH_SOURCE[0]}")"/ && pwd -P)"
-TZ=Europe/London
+
+# Determine if Slack Webhook URL is set and if notifications should be sent.
+NOTIFY=1
+if [ -z "$SLACK_WEBHOOK_URL" ];
+then
+  NOTIFY=0
+fi
+
+export APP_ROOT
+export NOTIFY
+export AZ_SUBSCRIPTION_SCOPE
+export SLACK_WEBHOOK_URL
+export SILENT
+export LOG_LEVEL
+
+
 
 BASH_FUNCTION_DIR="$APP_ROOT/bin/functions"
 for bash_function_file in "$BASH_FUNCTION_DIR"/*
@@ -20,37 +49,55 @@ do
   done < <(grep "^function" "$bash_function_file" | cut -d" " -f2)
 done
 
-NOTIFY=1
 
-if [ -z "$SLACK_WEBHOOK_URL" ];
+
+print "DEBUG" "Starting Azure login process."
+print "DEBUG" "AZURE_CLIENT_ID: '$AZURE_CLIENT_ID'"
+if [ "$AZURE_CLIENT_SECRET" ];
 then
-  print "WARNING" "No Slack Webhook URL defined. Output will only be available in stdout." "$SILENT"
-
-  NOTIFY=0
+  mask_secret=$(echo "$AZURE_CLIENT_SECRET" | cut -c1-4)
+  print "DEBUG" "AZURE_CLIENT_SECRET: '$mask_secret********'"
+else
+  print "DEBUG" "AZURE_CLIENT_SECRET: ''"
 fi
+print "DEBUG" "AZURE_TENANT_ID: '$AZURE_TENANT_ID'"
 
 if [[ "$AZURE_CLIENT_ID" && -z "$AZURE_CLIENT_SECRET" ]];
 then
-  print "INFO" "Detected Client ID '$AZURE_CLIENT_ID'. Using MSI login." "$SILENT"
+  print "INFO" "Detected Client ID '$AZURE_CLIENT_ID'. Using MSI login."
 
-  az login --identity --only-show-errors --output none
+  az login \
+    --identity \
+    --only-show-errors \
+    --output none
+
   if [ $? -ne 0 ]; then
     print "ERROR" "Azure MSI login failed."
     exit 1
   fi
 elif [[ "$AZURE_CLIENT_ID" && "$AZURE_CLIENT_SECRET" && "$AZURE_TENANT_ID" ]];
 then
-  print "WARNING" "Detected Client Credentials. Using service principal login." "$SILENT"
+  print "WARNING" "Detected Client Credentials. Using service principal login."
 
-  az login --service-principal -u "$AZURE_CLIENT_ID" -p "$AZURE_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID" --only-show-errors --output none
+  az login \
+    --service-principal \
+    --username "$AZURE_CLIENT_ID" \
+    --password "$AZURE_CLIENT_SECRET" \
+    --tenant "$AZURE_TENANT_ID" \
+    --only-show-errors \
+    --output none
+
   if [ $? -ne 0 ]; then
     print "ERROR" "Azure service principal login failed."
     exit 1
   fi
 else
-  print "WARNING" "Unable to detect system credentials. Using interactive login." "$SILENT"
+  print "WARNING" "Unable to detect env credentials. Using interactive login."
 
-  az login --only-show-errors --output none
+  az login \
+    --only-show-errors \
+    --output none
+
   if [ $? -ne 0 ]; then
     print "ERROR" "Azure CLI login failed."
     exit 1
@@ -58,21 +105,26 @@ else
 fi
 
 if [ -z "$AZ_SUBSCRIPTION_SCOPE" ]; then
+  print \
+    "WARNING" \
+    "'AZ_SUBSCRIPTION_SCOPE' is not set. Assuming default subscription."
+
   AZ_SUBSCRIPTION_SCOPE="$(az account show | jq -r '.name')"
-  print "WARNING" "Azure Subscription is not defined. Falling back to default: '$AZ_SUBSCRIPTION_SCOPE'"
 fi
 
-az account set --subscription "$AZ_SUBSCRIPTION_SCOPE" --only-show-errors --output none
+az account set \
+  --subscription "$AZ_SUBSCRIPTION_SCOPE" \
+  --only-show-errors \
+  --output none
+
 if [ $? -ne 0 ]; then
   print "ERROR" "Failed to set Azure subscription to '$AZ_SUBSCRIPTION_SCOPE'."
   exit 1
+else
+  print "DEBUG" "Azure subscription set to '$AZ_SUBSCRIPTION_SCOPE'."
 fi
 
-export TZ
-export APP_ROOT
-export NOTIFY
-export AZ_SUBSCRIPTION_SCOPE
-export SLACK_WEBHOOK_URL
+
 
 exec "$@"
 

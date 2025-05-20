@@ -13,23 +13,16 @@
 # Usage:
 #   ./afd-domain-scan.sh [-s <subscription name>] [-q]
 #      -s       <subscription name>      (optional) Azure Subscription
-#      -q                                (optional) Suppress output
-#
-#   If you do not specify the subscription name, the script will prompt you to
-#   select one based on the current logged in Azure user
 ################################################################################
 
 set -e
 
-SILENT=0
+SILENT=${SILENT:-"0"}
 
-while getopts "s:q" opt; do
+while getopts "s" opt; do
   case $opt in
     s)
       AZ_SUBSCRIPTION_SCOPE=$OPTARG
-      ;;
-    q)
-      SILENT=1
       ;;
     *)
       ;;
@@ -37,60 +30,21 @@ while getopts "s:q" opt; do
 done
 
 # Entered a dead-end without user input
-if [ "$SILENT" == 1 ] && [ -z "$AZ_SUBSCRIPTION_SCOPE" ]; then
-  print "ERROR" "You must specify the Subscription ID or Name when using the silent switch"
+if [ -z "$AZ_SUBSCRIPTION_SCOPE" ]; then
+  print "ERROR" "You must specify the Subscription ID or Name. Unable to continue."
 
   if [ "$NOTIFY" == 1 ]; then
     bash "$APP_ROOT/bin/notify" \
-      -t "Error: Silent switch is used but no Subscription scope was specified. Unable to continue"
+      -t "Error: Azure Subscription ID is not set. Unable to continue."
   fi
 
   exit 1
 fi
 
-# If a subscription scope has not been defined on the command line using '-e'
-# then prompt the user to select a subscription from the account
-if [ -z "${AZ_SUBSCRIPTION_SCOPE}" ]; then
-  AZ_SUBSCRIPTIONS=$(
-    az account list --output json |
-    jq -c '[.[] | select(.state == "Enabled").name]'
-  )
-
-  print "INFO" "Choose an option: "
-
-  AZ_SUBSCRIPTIONS="$(echo "$AZ_SUBSCRIPTIONS" | jq -r '. | join(",")')"
-
-  # Read from the list of available subscriptions and prompt them to the user
-  # with a numeric index for each one
-  if [ -n "$AZ_SUBSCRIPTIONS" ]; then
-    IFS=',' read -r -a array <<< "$AZ_SUBSCRIPTIONS"
-
-    echo
-    cat -n < <(printf "%s\n" "${array[@]}")
-    echo
-
-    n=""
-
-    # Ask the user to select one of the indexes
-    while true; do
-        read -rp 'Select subscription to query: ' n
-        # If $n is an integer between one and $count...
-        if [ "$n" -eq "$n" ] && [ "$n" -gt 0 ]; then
-          break
-        fi
-    done
-
-    i=$((n-1)) # Arrays are zero-indexed
-    AZ_SUBSCRIPTION_SCOPE="${array[$i]}"
-  fi
-fi
-
-if [ $NOTIFY == 1 ]; then
+if [ "$NOTIFY" == 1 ]; then
   bash "$APP_ROOT/bin/notify" \
     -t "🎯 *AFD Domain Validation Renewal task started in \`$AZ_SUBSCRIPTION_SCOPE\`*"
 fi
-
-print "INFO" "Subscription: $AZ_SUBSCRIPTION_SCOPE"
 
 # Find all Azure Front Doors within the specified subscription
 AFD_LIST=$(
@@ -100,7 +54,6 @@ AFD_LIST=$(
   jq -rc '.[] | { "name": .name, "resourceGroup": .resourceGroup }'
 )
 
-LAST_PROCESSED_RESOURCE_GROUP=""
 COUNT_ACTIONED=0
 COUNT_DISMISSED=0
 
@@ -108,11 +61,7 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
   RESOURCE_GROUP=$(echo "$AZURE_FRONT_DOOR" | jq -rc '.resourceGroup')
   AFD_NAME=$(echo "$AZURE_FRONT_DOOR" | jq -rc '.name')
 
-  if [ "$LAST_PROCESSED_RESOURCE_GROUP" != "$RESOURCE_GROUP" ]; then
-    print "INFO" "Resource Group: $RESOURCE_GROUP" "$SILENT"
-  fi
-
-  print "INFO" "Azure Front Door: $AFD_NAME" "$SILENT"
+  print "INFO" "Scanning Azure Front Door: '$AFD_NAME' in Resource Group: '$RESOURCE_GROUP'."
 
   # Grab all the custom domains attached to the Azure Front Door
   ALL_CUSTOM_DOMAINS=$(
@@ -147,21 +96,21 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
       DOMAIN_TOKEN=$(echo "$DOMAIN" | jq -rc '.validationProperties.validationToken')
       DOMAIN_DNS_ZONE_ID=$(echo "$DOMAIN" | jq -rc '.azureDnsZone.id')
 
-      print "INFO" "Domain name: $DOMAIN_NAME  |  State: $STATE" "$SILENT"
+      print "INFO" "Domain name: '$DOMAIN_NAME'  |  State: '$STATE'"
 
       if [ "$STATE" == "Pending" ] || [ "$STATE" == "PendingRevalidation" ]; then
-        print "INFO" "Domain validation is in a Pending state" "$SILENT"
+        print "DEBUG" "Domain validation is in a Pending state"
 
         # Check expiry of existing token
         DOMAIN_VALIDATION_EXPIRY_DATE=${DOMAIN_VALIDATION_EXPIRY:0:10}
         DOMAIN_VALIDATION_EXPIRY_DATE_COMP=${DOMAIN_VALIDATION_EXPIRY_DATE//-/}
         TODAY_COMP=${TODAY//-/}
 
-        print "INFO" "Token $DOMAIN_TOKEN expires on $DOMAIN_VALIDATION_EXPIRY_DATE" "$SILENT"
+        print "DEBUG" "Token $DOMAIN_TOKEN expires on $DOMAIN_VALIDATION_EXPIRY_DATE"
 
         if [[ "$DOMAIN_VALIDATION_EXPIRY_DATE_COMP" < "$TODAY_COMP" ]]; then
-          print "INFO" "Existing validation token has expired" "$SILENT"
-          print "INFO" "A new validation token will be requested from Front Door" "$SILENT"
+          print "WARNING" "Existing validation token has expired"
+          print "INFO" "A new validation token will be requested from Front Door"
 
           # Regenerate token
           az afd custom-domain regenerate-validation-token \
@@ -178,7 +127,7 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
 
           STATE=$(echo "$DOMAIN" | jq -rc '.domainValidationState')
         else
-          print "INFO" "Existing validation token is still valid and can be re-used" "$SILENT"
+          print "INFO" "Existing validation token is still valid and can be re-used"
         fi
 
         COUNT_ACTIONED=$((COUNT_ACTIONED+1))
@@ -190,13 +139,14 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
 
       # Second check of State due to potential resource refreshed
       if [ "$STATE" == "Pending" ] && [ "$SKIP" == "0" ]; then
-        if [ $NOTIFY == 1 ]; then
+        if [ "$NOTIFY" == 1 ]; then
           bash "$APP_ROOT/bin/notify" \
             -t ":warning: $DOMAIN_NAME is pending revalidation..."
         fi
 
         # Grab the new or existing token
         DOMAIN_TOKEN=$(echo "$DOMAIN" | jq -rc '.validationProperties.validationToken')
+        print "DEBUG" "Validation token: '$DOMAIN_TOKEN'"
 
         # Locate the DNS zone that holds the TXT Record Set
         DOMAIN_DNS_ZONE=$(
@@ -225,11 +175,11 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
           jq -rc '.TXTRecords[0].value[0]'
         )
 
-        print "INFO" "Existing DNS TXT Record: $RECORD_SET_CURRENT_TOKEN" "$SILENT"
+        print "DEBUG" "Existing DNS TXT Record: '$RECORD_SET_CURRENT_TOKEN'"
 
         if [ "$RECORD_SET_CURRENT_TOKEN" != "$DOMAIN_TOKEN" ]; then
-          print "INFO" "Expected DNS TXT Record: $DOMAIN_TOKEN" "$SILENT"
-          print "INFO" "DNS TXT Record will be automatically updated" "$SILENT"
+          print "DEBUG" "Expected DNS TXT Record: '$DOMAIN_TOKEN'"
+          print "INFO" "DNS TXT Record will be automatically updated"
 
           # Update the DNS record with the validation token
           RECORD_SET_STATE=$(
@@ -243,27 +193,25 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
             jq -rc '.provisioningState'
           )
 
-          print "INFO" "Set new DNS TXT Record request status: $RECORD_SET_STATE" "$SILENT"
+          print "DEBUG" "Set new DNS TXT Record request status: $RECORD_SET_STATE"
 
           if [ $NOTIFY == 1 ]; then
             bash "$APP_ROOT/bin/notify" \
               -t "✅ DNS TXT record for $DOMAIN_NAME was updated to \`$DOMAIN_TOKEN\`"
           fi
         else
-          print "INFO" "DNS TXT Record is still valid" "$SILENT"
+          print "INFO" "DNS TXT Record is still valid"
         fi
       fi
     done
   else
-    print "INFO" "No domains found" "$SILENT"
+    print "INFO" "No domains found"
   fi
-
-  LAST_PROCESSED_RESOURCE_GROUP=$RESOURCE_GROUP
 done
 
 print "INFO" "Finished execution. $COUNT_ACTIONED domains were updated. $COUNT_DISMISSED domains were valid"
 
-if [ $NOTIFY == 1 ]; then
+if [ "$NOTIFY" == 1 ]; then
   bash "$APP_ROOT/bin/notify" \
     -t "Finished execution. $COUNT_ACTIONED domains were updated. $COUNT_DISMISSED domains were valid"
 fi

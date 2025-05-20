@@ -3,37 +3,77 @@
 # /**
 #  * @brief Outputs a log message with a timestamp and specified level.
 #  *
-#  * This function takes a log level, a message, and an optional quiet flag.
-#  * It formats the output with a timestamp and the log level indicator.
+#  * This function takes a log level, and a message
+#  * It formats the output with a log level indicator, and the script name.
 #  * Error messages are directed to standard error.
 #  *
 #  * @param level (string) The log level of the message.
-#  * Valid values are: "INFO", "WARNING", "ERROR".
+#  * Valid values are: "INFO", "WARNING", "ERROR", "DEBUG".
 #  * If no level is provided, it defaults to "INFO".
 #  * @param message (string) The log message to be displayed.
-#  * @param quiet (optional, integer) A flag to suppress output.
-#  * Set to '1' to disable output, '0' (or omitted) to enable.
 #  *
+#  * @usage print "DEBUG" "Something uninteresting happened."
 #  * @usage print "INFO" "Script started successfully."
 #  * @usage print "WARNING" "Approaching a critical threshold."
-#  * @usage print "ERROR" "Failed to connect to the server." 1
+#  * @usage print "ERROR" "Failed to connect to the server."
 #  */
 function print {
-  local level="$1"
-  local log="$2"
-  local quiet="${3:-0}"
+  local msg_level="$1"
+  local log_message="$2"
   local script_base_name=$(basename "$0")
 
-  if [ "$quiet" == "0" ]; then
-    case "$level" in
+  # Convert both global LOG_LEVEL and message level to uppercase for comparison
+  local upper_global_log_level=$(echo "$LOG_LEVEL" | tr '[:lower:]' '[:upper:]')
+  local upper_msg_level=$(echo "$msg_level" | tr '[:lower:]' '[:upper:]')
+
+  # Determine if the message should be printed based on the global LOG_LEVEL
+  local should_print=0 # Default to not print
+  case "$upper_global_log_level" in
+    "DEBUG")
+        should_print=1 # Print all levels
+      ;;
+    "INFO")
+      if [[ "$upper_msg_level" == "DEBUG" ]]; then
+        should_print=0 # Do not print DEBUG if LOG_LEVEL is INFO
+      else
+        should_print=1 # Print INFO, WARNING, ERROR
+      fi
+    ;;
+    "ERROR")
+      if [[ "$upper_msg_level" == "ERROR" ]];
+      then
+        should_print=1
+      fi
+      ;;
+    "WARNING")
+      if [[ "$upper_msg_level" == "ERROR" || "$upper_msg_level" == "WARNING" ]];
+      then
+        should_print=1
+      fi
+      ;;
+    *) # Default to INFO if LOG_LEVEL is not set or invalid
+      if [[ "$upper_msg_level" == "DEBUG" ]]; then
+        should_print=0 # Do not print DEBUG by default
+      else
+        should_print=1 # Print INFO, WARNING, ERROR by default
+      fi
+      ;;
+  esac
+
+  if [ "$should_print" -eq 1 ];
+  then
+    case "$upper_msg_level" in
+      "DEBUG")
+        echo "[DEBUG] [$script_base_name] $log_message"
+        ;;
       "ERROR")
-        echo "[ERROR] [$script_base_name] $log" >&2
+        echo "[ERROR] [$script_base_name] $log_message" >&2
         ;;
       "WARNING")
-        echo "[WARNING] [$script_base_name] $log"
+        echo "[WARNING] [$script_base_name] $log_message"
         ;;
-      *) # Default to INFO
-        echo "[INFO] [$script_base_name] $log"
+      *) # Default to INFO if message level is not valid
+        echo "[INFO] [$script_base_name] $log_message"
         ;;
     esac
   fi
