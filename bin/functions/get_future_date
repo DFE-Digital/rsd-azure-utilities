@@ -1,0 +1,16 @@
+#!/bin/bash
+
+function get_future_date {
+  local days="$1"
+  local os_type=$(uname -s)
+
+  if [[ "$os_type" == "Darwin" ]];
+  then
+    gdate -j -f "%Y-%m-%d" "$(date +%Y-%m-%d)" "+%Y-%m-%dT23:59:59Z" -v+"$days"d 2>/dev/null || date -v+"$days"d +%Y-%m-%dT23:59:59Z
+  elif command -v gdate &> /dev/null;
+  then
+    gdate -d "today + $days days" "+%Y-%m-%dT23:59:59Z"
+  else
+    date -d "$days days" +%Y-%m-%dT23:59:59Z
+  fi
+}

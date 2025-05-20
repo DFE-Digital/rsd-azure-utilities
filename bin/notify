@@ -2,61 +2,77 @@
 set -e
 set -o pipefail
 
-APP_ROOT="$( cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd -P)"
-export APP_ROOT
-
 ################################################################################
 # Author:
 #   Ash Davies <@DrizzlyOwl>
 # Version:
-#   0.1.0
+#   1.0.0
 # Description:
-#   Dispatch a HTTP Webhook to Slack
+#   Dispatch a HTTP Webhook to Slack with various formatting options
 # Usage:
-#   ./notify.sh
+#   ./notify [-t <message>] [-l <heading>] [-d <description>] [-c <#color>] [-b <json_body>]
+#
+# Example 1: Simple text message
+#   send_slack_notification -t "This is a simple test message."
+#
+# Example 2: Message with label, description, and color
+#   send_slack_notification \
+#      -t "New Deployment Complete!" \
+#      -l "Project: MyAwesomeApp" \
+#      -d "Version 1.2.3 has been successfully deployed to production." \
+#      -c "#36a64f"
+#
+# Example 3: Message with additional fields (requires valid JSON array)
+#            Note: The JSON for -b needs to be a single-line string.
+#   ADDITIONAL_FIELDS='[{"type": "mrkdwn", "text": "*Environment:*\nProduction"},{"type": "mrkdwn", "text": "*Deployer:*\n@username"},{"type": "mrkdwn", "text": "*Link:*\n<http://example.com|View Dashboard>"}]'
+#   send_slack_notification \
+#     -t "Detailed Update" \
+#     -l "Status Report" \
+#     -d "Here are some more details about the recent activity." \
+#     -c "#ff9900" \
+#     -b "$ADDITIONAL_FIELDS"
+#
+# Example 4: Mixed usage - just a label and description with no main text
+#   notify \
+#   -l "Important Alert!" \
+#   -d "Please review the logs for recent errors." \
+#   -c "#FF0000"
 ################################################################################
 
-
-usage() {
-  echo "Usage: $(basename "$0")" 1>&2
-  echo "  -t '<my message>'   A short message to send"
-  echo "  -l '<heading>'      The heading for your text"
-  echo "  -d '<description>'  Context for your message"
-  echo "  -c '<#color>'       Specify a colour hex (optional)"
+usage () {
+  echo "Usage: $0 [-t <message>] [-l <heading>] [-d <description>] [-c <#color>] [-b <json_body>]"
+  echo "  -t <message>       A short message to send (main text)"
+  echo "  -l <heading>       The heading for your text (block 0 of attachment)"
+  echo "  -d <description>   Context for your message (block 1 of attachment)"
+  echo "  -c <#color>        Specify a color hex for the attachment (optional, default #007fff)"
+  echo "  -b <json_body>     Raw JSON for additional fields (optional, must be valid JSON array of objects)"
   exit 1
 }
-
-MORE_FIELDS=1
-
-BODY=${BODY:-""}
-SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-""}
-
+# Path to the base Slack webhook JSON template
+SLACK_WEBHOOK_TEMPLATE_PATH="$APP_ROOT/support/slack-webhook.json"
+TEXT=""
 COLOR="#007fff"
-TEXT="Hello, world!"
 LABEL=""
 DESCRIPTION=""
+BODY="" # For additional fields, passed as JSON string
 
-if [ "$SLACK_WEBHOOK_URL" == "" ]; then
-  exit
-fi
-
-if [ "$BODY" == "" ]; then
-  MORE_FIELDS=0
-fi
-
-while getopts "t:c:l:d:" opt; do
+# Parse arguments passed to the function
+while getopts "t:c:l:d:b:" opt; do
   case $opt in
     t)
-      TEXT=$OPTARG
+      TEXT="$OPTARG"
       ;;
     c)
-      COLOR=$OPTARG
+      COLOR="$OPTARG"
       ;;
     l)
-      LABEL=$OPTARG
+      LABEL="$OPTARG"
       ;;
     d)
-      DESCRIPTION=$OPTARG
+      DESCRIPTION="$OPTARG"
+      ;;
+    b)
+      BODY="$OPTARG"
       ;;
     *)
       usage
@@ -64,15 +80,32 @@ while getopts "t:c:l:d:" opt; do
   esac
 done
 
-# Only a single plain message needs to be sent
-if [ "${TEXT}" ] && [ ! "${LABEL}" ] && [ ! "${DESCRIPTION}" ]; then
-  curl -X POST -H 'Content-type: application/json' \
-    --data "{ \"text\": \"$TEXT\"}" "$SLACK_WEBHOOK_URL"
-
-  exit
+if [[ $# -eq 0 ]]; then
+  usage
 fi
 
-if [ "${DESCRIPTION}" ]; then
+shift $((OPTIND-1)) # Shift processed options
+
+if [ -z "$SLACK_WEBHOOK_URL" ]; then
+  print "WARNING" "SLACK_WEBHOOK_URL is not set. Skipping Slack notification."
+  exit 1
+fi
+
+PAYLOAD=""
+TEMP_FINAL_JSON="temp_final.json" # Temporary file for JSON building
+
+# Only a single plain message needs to be sent if no label, description, or body are provided
+if [ -n "$TEXT" ] && [ -z "$LABEL" ] && [ -z "$DESCRIPTION" ] && [ -z "$BODY" ]; then
+  PAYLOAD="{ \"text\": \"$TEXT\"}"
+else
+  # Build a more complex message using the template
+  # Ensure the SLACK_WEBHOOK_TEMPLATE_PATH exists and is readable
+  if [ ! -f "$SLACK_WEBHOOK_TEMPLATE_PATH" ]; then
+    print "ERROR" "Slack webhook template not found at $SLACK_WEBHOOK_TEMPLATE_PATH. Cannot send rich message."
+    exit 1
+  fi
+
+  # Start with the template and apply common fields
   jq \
     --arg color "${COLOR}" \
     --arg text "${TEXT}" \
@@ -81,22 +114,39 @@ if [ "${DESCRIPTION}" ]; then
     '.attachments[0].color = $color |
     .attachments[0].blocks[0].text.text = $label |
     .attachments[0].blocks[1].text.text = $desc |
-    .text = $text' ../support/slack-webhook.json > final.json
-fi
+    .text = $text' "$SLACK_WEBHOOK_TEMPLATE_PATH" > "$TEMP_FINAL_JSON"
 
-if [ $MORE_FIELDS == 1 ]; then
-  BODY=$(echo "$BODY" | jq -cr)
+  # Add additional fields if provided
+  if [ -n "$BODY" ]; then
+    # Validate and parse BODY as JSON array
+    if ! echo "$BODY" | jq -e '.[0]?' > /dev/null 2>&1; then
+      print "ERROR" "Provided BODY is not valid JSON array. Skipping additional fields."
+      rm -f "$TEMP_FINAL_JSON" # Clean up temp file
+      exit 1
+    fi
 
-  if [ "$BODY" != "" ]; then
-    mv final.json tmp.final.json
+    mv "$TEMP_FINAL_JSON" "${TEMP_FINAL_JSON}.tmp" # Rename current temp file
     jq \
       --argjson fields "$BODY" \
       '.attachments[0].blocks[2].fields = $fields |
-      .attachments[0].blocks[2].type = "section"' tmp.final.json > final.json
+      .attachments[0].blocks[2].type = "section"' "${TEMP_FINAL_JSON}.tmp" > "$TEMP_FINAL_JSON"
+    rm -f "${TEMP_FINAL_JSON}.tmp" # Clean up the renamed temp file
   fi
+
+  PAYLOAD=$(cat "$TEMP_FINAL_JSON")
+  rm -f "$TEMP_FINAL_JSON" # Clean up the temporary JSON file
 fi
 
-PAYLOAD=$(cat final.json)
+print "DEBUG" "Sending Slack notification..."
+print "DEBUG" "Payload: $PAYLOAD"
 
 curl -X POST -H 'Content-type: application/json' \
   --data "$PAYLOAD" "$SLACK_WEBHOOK_URL"
+
+if [ $? -ne 0 ]; then
+  print "ERROR" "Failed to send Slack notification."
+  exit 1
+else
+  print "INFO" "Slack notification sent successfully."
+  exit 0
+fi

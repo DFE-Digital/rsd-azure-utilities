@@ -1,0 +1,216 @@
+#!/bin/bash
+
+set -e
+set -o pipefail
+
+################################################################################
+# Author:
+#   Ash Davies <@DrizzlyOwl>
+# Version:
+#   1.0.0
+# Description:
+#   Search an Azure AD for App Registrations that have Client Credentials with
+#   expiry dates. If an expiry date is due within the next 90 days report it
+# Usage:
+#   ./entra-app-scan
+################################################################################
+
+# Ensure jq and curl are installed
+if ! command -v jq &> /dev/null || ! command -v curl &> /dev/null;
+then
+  print "ERROR" "jq or curl is not installed. Please install them to proceed."
+  exit 1
+fi
+
+# Define a temporary file to store client IDs if fetched from --show-mine
+TEMP_CLIENT_IDS_FILE=$(mktemp)
+# Ensure the temporary file is deleted on exit
+trap 'rm -f "$TEMP_CLIENT_IDS_FILE"' EXIT
+
+# Read Client IDs from an environment variable.
+# The environment variable should contain a space-separated list of Client IDs.
+# Example: export APP_REGISTRATIONS="id1 id2 id3"
+# If the environment variable is not set, the script will try to source owned apps.
+if [ -z "$APP_REGISTRATIONS" ];
+then
+  print "DEBUG" "No App Registrations specified. Defaulting to all owned App Registrations."
+
+  # Get the user's own applications, and extract the appId (Client ID)
+  # Redirect output to the temporary file, one ID per line
+  az ad app list --show-mine --query "[].appId" -o tsv > "$TEMP_CLIENT_IDS_FILE"
+
+  # Check if the command was successful
+  if [ $? -ne 0 ];
+  then
+    print "ERROR" "Failed to fetch your Azure AD applications using 'az ad app list --show-mine'. Please ensure you are logged in to Azure CLI and have the necessary permissions."
+    exit 1
+  fi
+
+  # Check if the temporary file is empty
+  if [ ! -s "$TEMP_CLIENT_IDS_FILE" ];
+  then
+    print "ERROR" "No applications found using 'az ad app list --show-mine'. Exiting."
+    exit 0
+  fi
+else
+  print "DEBUG" "Using applications from environment variable 'APP_REGISTRATIONS'."
+
+  # Write the space-separated string from the environment variable to the temporary file,
+  # ensuring each ID is on a new line for the while loop.
+  echo "${!APP_REGISTRATIONS}" | tr ' ' '\n' > "$TEMP_CLIENT_IDS_FILE"
+
+  # Check if the file is empty after parsing (e.g., if env var was set but empty)
+  if [ ! -s "$TEMP_CLIENT_IDS_FILE" ]; then
+    print "ERROR" "'APP_REGISTRATIONS' is set but empty. Please provide Client IDs."
+    exit 1
+  fi
+fi
+
+# Set the number of days for expiry check
+EXPIRY_THRESHOLD_DAYS=90
+print "DEBUG" "Expiry threshold in days set to '$EXPIRY_THRESHOLD_DAYS'."
+
+TODAY_DATE=$(get_future_date "0")
+TODAY_DATE_YMD=${TODAY_DATE:0:10}
+TODAY_DATE=${TODAY_DATE_YMD//-/}
+FUTURE_DATE=$(get_future_date "$EXPIRY_THRESHOLD_DAYS")
+FUTURE_DATE_YMD=${FUTURE_DATE:0:10}
+FUTURE_DATE=${FUTURE_DATE_YMD//-/}
+print "DEBUG" "Client Credentials with an expiry date on or before $FUTURE_DATE_YMD will be reported."
+
+EXPIRING_SECRETS_FOUND=false
+SECRET_EXPIRING_SOON_COUNT=0
+SECRET_EXPIRED_COUNT=0
+
+# Initialize an empty array to store results
+declare -a RESULTS_ARRAY=()
+
+# Reset file pointer to the beginning for the main processing loop
+exec 3< "$TEMP_CLIENT_IDS_FILE" # Open file descriptor 3 for reading
+
+while IFS= read -r client_id <&3;
+do
+  # Skip empty lines that might result from tr or malformed input
+  if [ -z "$client_id" ];
+  then
+      continue
+  fi
+
+  APP_EXPIRING_SECRETS_FOUND=false
+  APP_SLACK_SECRET_FIELDS=''
+
+  print "INFO" "Retrieving details for Client ID: '$client_id'."
+
+  APP_DETAILS=$(az ad app list \
+    --filter "appId eq '$client_id'" \
+    --query "[0].{appId:appId, displayName:displayName, objectId:objectId, passwordCredentials:passwordCredentials}" \
+    -o json 2>/dev/null)
+
+  if [ $? -eq 0 ] && [ -n "$APP_DETAILS" ] && [ "$APP_DETAILS" != "null" ]; then
+    APP_NAME=$(echo "$APP_DETAILS" | jq -r '.displayName')
+    SECRETS_JSON=$(echo "$APP_DETAILS" | jq -r '.passwordCredentials')
+    APP_EXPIRING_SECRETS_FOUND=false
+    APP_SLACK_SECRET_FIELDS=''
+
+    print "DEBUG" "Display Name: $APP_NAME"
+    print "DEBUG" "Object ID: $client_id"
+
+    RESULTS_ARRAY+=("$APP_DETAILS")
+
+    while IFS= read -r secret_json;
+    do
+      SECRET_NAME=$(echo "$secret_json" | jq -r '.displayName')
+      SECRET_EXPIRY_DATE_STRING=$(echo "$secret_json" | jq -r '.endDateTime')
+      SECRET_EXPIRY_DATE_YMD=${SECRET_EXPIRY_DATE_STRING:0:10}
+      SECRET_EXPIRY_DATE=${SECRET_EXPIRY_DATE_YMD//-/}
+      SECRET_EXPIRY_DIFF_FUTURE=$((SECRET_EXPIRY_DATE-FUTURE_DATE))
+      SECRET_EXPIRY_DIFF_NOW=$((SECRET_EXPIRY_DATE-TODAY_DATE))
+
+      if [[ "$SECRET_EXPIRY_DIFF_NOW" -le "0" ]];
+      then
+        SECRET_STATE_EMOJI=":octagonal_sign:"
+        SECRET_EXPIRED_COUNT=$((SECRET_EXPIRED_COUNT+1))
+        print "WARNING" "'$SECRET_NAME' expired on $SECRET_EXPIRY_DATE_STRING"
+      elif [[ "$SECRET_EXPIRY_DIFF_FUTURE" -le "0" ]];
+      then
+        SECRET_STATE_EMOJI=":warning:"
+        SECRET_EXPIRING_SOON_COUNT=$((SECRET_EXPIRING_SOON_COUNT+1))
+        print "WARNING" "'$SECRET_NAME' expiring in the next $EXPIRY_THRESHOLD_DAYS days"
+      else
+        SECRET_STATE_EMOJI=":white_check_mark:"
+        print "INFO" "'$SECRET_NAME' valid until $SECRET_EXPIRY_DATE_STRING"
+      fi
+
+      if [[ "$SECRET_EXPIRY_DATE" -le "$FUTURE_DATE" ]];
+      then
+        APP_EXPIRING_SECRETS_FOUND=true
+
+        # Create a single field object
+        NEW_FIELD=$(jq -n --arg secret_name "$SECRET_STATE_EMOJI *Secret Name:* $SECRET_NAME" --arg expiry_date ":alarm_clock: *Expiry Date:* $SECRET_EXPIRY_DATE_YMD" '{
+          "type": "mrkdwn",
+          "text": ($secret_name + "\n" + $expiry_date)
+        }')
+
+        if [ -z "$APP_SLACK_SECRET_FIELDS" ]; then
+          APP_SLACK_SECRET_FIELDS="[$NEW_FIELD]"
+        else
+          # Append the new field to the existing JSON array of fields
+          APP_SLACK_SECRET_FIELDS=$(jq -n --argjson existing "$APP_SLACK_SECRET_FIELDS" --argjson new "$NEW_FIELD" '$existing + [$new]')
+        fi
+      fi
+    done < <(echo "$SECRETS_JSON" | jq -c '.[]')
+
+    if [ "$(echo "$SECRETS_JSON" | jq 'length')" -lt 1 ];
+    then
+      print "INFO" "No client credentials found"
+    else
+      if [ "$APP_EXPIRING_SECRETS_FOUND" = true ];
+      then
+        EXPIRING_SECRETS_FOUND=true
+
+        /bin/bash "$APP_ROOT/bin/notify" \
+          -t ":dart: Client Credentials Scan Alert for '$APP_NAME'" \
+          -l "App ID: $client_id" \
+          -d "The following client credentials are expiring soon or have expired:" \
+          -c "#FF0000" \
+          -b "$APP_SLACK_SECRET_FIELDS" # Pass the collected fields as JSON string
+      fi
+    fi
+  else
+    print "WARNING" "Could not find details for Client ID: '$client_id'. It might not exist or you lack permissions."
+  fi
+done
+
+exec 3<&-
+
+# Send Slack notification
+if [ "$EXPIRING_SECRETS_FOUND" = false ];
+then
+  print "INFO" "No client secrets found expiring within the next $EXPIRY_THRESHOLD_DAYS days."
+fi
+
+APP_REGISTRATIONS_COUNT=${#RESULTS_ARRAY[@]}
+
+# Determine summary message and color
+SUMMARY_COLOR="#007fff" # Default blue/info
+if [ "$SECRET_EXPIRED_COUNT" -gt 0 ]; then
+  SUMMARY_COLOR="#FF0000" # Red for expired
+elif [ "$SECRET_EXPIRING_SOON_COUNT" -gt 0 ]; then
+  SUMMARY_COLOR="#FFA500" # Orange for expiring soon
+fi
+
+SUMMARY_MESSAGE="Finished scanning $APP_REGISTRATIONS_COUNT App Registrations."
+SUMMARY_DESCRIPTION="$SECRET_EXPIRING_SOON_COUNT client credentials are expiring soon. $SECRET_EXPIRED_COUNT have expired."
+
+/bin/bash "$APP_ROOT/bin/notify" \
+  -t "Client Credentials Scan Summary" \
+  -l "$SUMMARY_MESSAGE" \
+  -d "$SUMMARY_DESCRIPTION" \
+  -c "$SUMMARY_COLOR"
+
+print "INFO" "$SUMMARY_MESSAGE $SUMMARY_DESCRIPTION"
+
+if [ "$EXPIRING_SECRETS_FOUND" = false ] && [ "$SECRET_EXPIRING_SOON_COUNT" -eq 0 ] && [ "$SECRET_EXPIRED_COUNT" -eq 0 ];
+then
+  print "INFO" "No client secrets found expiring within the next $EXPIRY_THRESHOLD_DAYS days."
+fi

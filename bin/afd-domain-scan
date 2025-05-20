@@ -11,13 +11,16 @@
 #   'pending' state then a new domain validation token is requested and the DNS
 #   TXT record set is updated with the new token.
 # Usage:
-#   ./afd-domain-scan.sh [-s <subscription name>] [-q]
-#      -s       <subscription name>      (optional) Azure Subscription
+#   ./afd-domain-scan [-s <subscription name>]
 ################################################################################
 
 set -e
 
-SILENT=${SILENT:-"0"}
+usage () {
+  echo "Usage: $0 [-s <subscription name>]"
+  echo "  -s <subscription name>   Azure Subscription ID or Name (optional)"
+  exit 1
+}
 
 while getopts "s" opt; do
   case $opt in
@@ -25,6 +28,7 @@ while getopts "s" opt; do
       AZ_SUBSCRIPTION_SCOPE=$OPTARG
       ;;
     *)
+      usage
       ;;
   esac
 done
