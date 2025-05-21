@@ -2,7 +2,8 @@
 
 function get_future_date {
   local days="$1"
-  local os_type=$(uname -s)
+  local os_type
+  os_type=$(uname -s)
 
   if [[ "$os_type" == "Darwin" ]];
   then

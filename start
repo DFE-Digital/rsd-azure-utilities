@@ -50,6 +50,12 @@ do
 done
 
 
+# Ensure jq and curl are installed
+if ! command -v jq &> /dev/null || ! command -v curl &> /dev/null;
+then
+  print "ERROR" "jq or curl is not installed. Please install them to proceed."
+  exit 1
+fi
 
 print "DEBUG" "Starting Azure login process."
 print "DEBUG" "AZURE_CLIENT_ID: '$AZURE_CLIENT_ID'"
@@ -66,12 +72,11 @@ if [[ "$AZURE_CLIENT_ID" && -z "$AZURE_CLIENT_SECRET" ]];
 then
   print "INFO" "Detected Client ID '$AZURE_CLIENT_ID'. Using MSI login."
 
-  az login \
+  if ! az login \
     --identity \
     --only-show-errors \
-    --output none
-
-  if [ $? -ne 0 ]; then
+    --output none;
+  then
     print "ERROR" "Azure MSI login failed."
     exit 1
   fi
@@ -79,32 +84,31 @@ elif [[ "$AZURE_CLIENT_ID" && "$AZURE_CLIENT_SECRET" && "$AZURE_TENANT_ID" ]];
 then
   print "WARNING" "Detected Client Credentials. Using service principal login."
 
-  az login \
+  if ! az login \
     --service-principal \
     --username "$AZURE_CLIENT_ID" \
     --password "$AZURE_CLIENT_SECRET" \
     --tenant "$AZURE_TENANT_ID" \
     --only-show-errors \
-    --output none
-
-  if [ $? -ne 0 ]; then
+    --output none;
+  then
     print "ERROR" "Azure service principal login failed."
     exit 1
   fi
 else
   print "WARNING" "Unable to detect env credentials. Using interactive login."
 
-  az login \
+  if ! az login \
     --only-show-errors \
-    --output none
-
-  if [ $? -ne 0 ]; then
+    --output none;
+  then
     print "ERROR" "Azure CLI login failed."
     exit 1
   fi
 fi
 
-if [ -z "$AZ_SUBSCRIPTION_SCOPE" ]; then
+if [ -z "$AZ_SUBSCRIPTION_SCOPE" ];
+then
   print \
     "WARNING" \
     "'AZ_SUBSCRIPTION_SCOPE' is not set. Assuming default subscription."
@@ -112,25 +116,26 @@ if [ -z "$AZ_SUBSCRIPTION_SCOPE" ]; then
   AZ_SUBSCRIPTION_SCOPE="$(az account show | jq -r '.name')"
 fi
 
-az account set \
+if ! az account set \
   --subscription "$AZ_SUBSCRIPTION_SCOPE" \
   --only-show-errors \
-  --output none
-
-if [ $? -ne 0 ]; then
+  --output none;
+then
   print "ERROR" "Failed to set Azure subscription to '$AZ_SUBSCRIPTION_SCOPE'."
   exit 1
 else
   print "DEBUG" "AZ_SUBSCRIPTION_SCOPE: '$AZ_SUBSCRIPTION_SCOPE'."
 fi
 
-if [ -z "$1" ]; then
+if [ -z "$1" ];
+then
   print "ERROR" "No script to execute. Exiting."
   exit 1
 else
   print "DEBUG" "Executing script: '$1'."
 
-  if [ ! -f "$1" ]; then
+  if [ ! -f "$1" ];
+  then
     print "ERROR" "Script '$1' not found. Exiting."
     exit 1
   fi

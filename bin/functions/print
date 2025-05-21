@@ -20,11 +20,14 @@
 function print {
   local msg_level="$1"
   local log_message="$2"
-  local script_base_name=$(basename "$0")
+  local script_base_name
+  local upper_global_log_level
+  local upper_msg_level
+  script_base_name=$(basename "$0")
 
   # Convert both global LOG_LEVEL and message level to uppercase for comparison
-  local upper_global_log_level=$(echo "$LOG_LEVEL" | tr '[:lower:]' '[:upper:]')
-  local upper_msg_level=$(echo "$msg_level" | tr '[:lower:]' '[:upper:]')
+  upper_global_log_level=$(echo "$LOG_LEVEL" | tr '[:lower:]' '[:upper:]')
+  upper_msg_level=$(echo "$msg_level" | tr '[:lower:]' '[:upper:]')
 
   # Determine if the message should be printed based on the global LOG_LEVEL
   local should_print=0 # Default to not print

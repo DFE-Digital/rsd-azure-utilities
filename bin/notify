@@ -57,7 +57,8 @@ DESCRIPTION=""
 BODY="" # For additional fields, passed as JSON string
 
 # Parse arguments passed to the function
-while getopts "t:c:l:d:b:" opt; do
+while getopts "t:c:l:d:b:" opt;
+do
   case $opt in
     t)
       TEXT="$OPTARG"
@@ -80,13 +81,15 @@ while getopts "t:c:l:d:b:" opt; do
   esac
 done
 
-if [[ $# -eq 0 ]]; then
+if [[ $# -eq 0 ]];
+then
   usage
 fi
 
 shift $((OPTIND-1)) # Shift processed options
 
-if [ -z "$SLACK_WEBHOOK_URL" ]; then
+if [ -z "$SLACK_WEBHOOK_URL" ];
+then
   print "WARNING" "SLACK_WEBHOOK_URL is not set. Skipping Slack notification."
   exit 1
 fi
@@ -95,12 +98,12 @@ PAYLOAD=""
 TEMP_FINAL_JSON="temp_final.json" # Temporary file for JSON building
 
 # Only a single plain message needs to be sent if no label, description, or body are provided
-if [ -n "$TEXT" ] && [ -z "$LABEL" ] && [ -z "$DESCRIPTION" ] && [ -z "$BODY" ]; then
+if [ -n "$TEXT" ] && [ -z "$LABEL" ] && [ -z "$DESCRIPTION" ] && [ -z "$BODY" ];
+then
   PAYLOAD="{ \"text\": \"$TEXT\"}"
 else
-  # Build a more complex message using the template
-  # Ensure the SLACK_WEBHOOK_TEMPLATE_PATH exists and is readable
-  if [ ! -f "$SLACK_WEBHOOK_TEMPLATE_PATH" ]; then
+  if [ ! -f "$SLACK_WEBHOOK_TEMPLATE_PATH" ];
+  then
     print "ERROR" "Slack webhook template not found at $SLACK_WEBHOOK_TEMPLATE_PATH. Cannot send rich message."
     exit 1
   fi
@@ -116,10 +119,10 @@ else
     .attachments[0].blocks[1].text.text = $desc |
     .text = $text' "$SLACK_WEBHOOK_TEMPLATE_PATH" > "$TEMP_FINAL_JSON"
 
-  # Add additional fields if provided
-  if [ -n "$BODY" ]; then
-    # Validate and parse BODY as JSON array
-    if ! echo "$BODY" | jq -e '.[0]?' > /dev/null 2>&1; then
+  if [ -n "$BODY" ];
+  then
+    if ! echo "$BODY" | jq -e '.[0]?' > /dev/null 2>&1;
+    then
       print "ERROR" "Provided BODY is not valid JSON array. Skipping additional fields."
       rm -f "$TEMP_FINAL_JSON" # Clean up temp file
       exit 1
@@ -140,10 +143,9 @@ fi
 print "DEBUG" "Sending Slack notification..."
 print "DEBUG" "Payload: $PAYLOAD"
 
-curl -X POST -H 'Content-type: application/json' \
-  --data "$PAYLOAD" "$SLACK_WEBHOOK_URL"
-
-if [ $? -ne 0 ]; then
+if ! curl -X POST -H 'Content-type: application/json' \
+  --data "$PAYLOAD" "$SLACK_WEBHOOK_URL";
+then
   print "ERROR" "Failed to send Slack notification."
   exit 1
 else

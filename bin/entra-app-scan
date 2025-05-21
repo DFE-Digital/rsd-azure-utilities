@@ -21,13 +21,6 @@ usage () {
   echo "  -d <days>   Set the number of days for expiry check (default: 90)"
 }
 
-# Ensure jq and curl are installed
-if ! command -v jq &> /dev/null || ! command -v curl &> /dev/null;
-then
-  print "ERROR" "jq or curl is not installed. Please install them to proceed."
-  exit 1
-fi
-
 # Define a temporary file to store client IDs if fetched from --show-mine
 TEMP_CLIENT_IDS_FILE=$(mktemp)
 # Ensure the temporary file is deleted on exit
@@ -43,10 +36,10 @@ then
 
   # Get the user's own applications, and extract the appId (Client ID)
   # Redirect output to the temporary file, one ID per line
-  az ad app list --show-mine --query "[].appId" -o tsv > "$TEMP_CLIENT_IDS_FILE"
-
-  # Check if the command was successful
-  if [ $? -ne 0 ];
+  if ! az ad app list \
+    --show-mine \
+    --query "[].appId" \
+    -o tsv > "$TEMP_CLIENT_IDS_FILE";
   then
     print "ERROR" "Failed to fetch your Azure AD applications using 'az ad app list --show-mine'. Please ensure you are logged in to Azure CLI and have the necessary permissions."
     exit 1
@@ -59,9 +52,9 @@ fi
 
 print "DEBUG" "TEMP_CLIENT_IDS_FILE: $TEMP_CLIENT_IDS_FILE"
 print "DEBUG" "Contents of $TEMP_CLIENT_IDS_FILE before processing:"
-cat "$TEMP_CLIENT_IDS_FILE" | while read -r line; do
+while read -r line; do
   print "DEBUG" "  > $line"
-done
+done < "$TEMP_CLIENT_IDS_FILE"
 
 # Check if the temporary file is empty
 if [ ! -s "$TEMP_CLIENT_IDS_FILE" ];
@@ -84,7 +77,8 @@ while getopts "d" opt; do
   esac
 done
 
-if ! [[ "$EXPIRY_THRESHOLD_DAYS" =~ ^[0-9]+$ ]]; then
+if ! [[ "$EXPIRY_THRESHOLD_DAYS" =~ ^[0-9]+$ ]];
+then
   print "ERROR" "Expiry threshold must be a positive number."
   exit 1
 fi
@@ -110,10 +104,10 @@ declare -a RESULTS_ARRAY=()
 # Reset file pointer to the beginning for the main processing loop
 exec 3< "$TEMP_CLIENT_IDS_FILE" # Open file descriptor 3 for reading
 
-while IFS= read -r client_id <&3;
+while IFS= read -r CLIENT_ID <&3;
 do
   # Skip empty lines that might result from tr or malformed input
-  if [ -z "$client_id" ];
+  if [ -z "$CLIENT_ID" ];
   then
       continue
   fi
@@ -121,21 +115,20 @@ do
   APP_EXPIRING_SECRETS_FOUND=false
   APP_SLACK_SECRET_FIELDS=''
 
-  print "INFO" "Retrieving details for Client ID: '$client_id'."
+  print "INFO" "Retrieving details for Client ID: '$CLIENT_ID'."
 
-  APP_DETAILS=$(az ad app list \
-    --filter "appId eq '$client_id'" \
+  if APP_DETAILS=$(az ad app list \
+    --filter "appId eq '$CLIENT_ID'" \
     --query "[0].{appId:appId, displayName:displayName, objectId:objectId, passwordCredentials:passwordCredentials}" \
-    -o json 2>/dev/null)
-
-  if [ $? -eq 0 ] && [ -n "$APP_DETAILS" ] && [ "$APP_DETAILS" != "null" ]; then
+    -o json 2>/dev/null) && [ -n "$APP_DETAILS" ] && [ "$APP_DETAILS" != "null" ];
+  then
     APP_NAME=$(echo "$APP_DETAILS" | jq -r '.displayName')
     SECRETS_JSON=$(echo "$APP_DETAILS" | jq -r '.passwordCredentials')
     APP_EXPIRING_SECRETS_FOUND=false
     APP_SLACK_SECRET_FIELDS=''
 
     print "DEBUG" "Display Name: $APP_NAME"
-    print "DEBUG" "Object ID: $client_id"
+    print "DEBUG" "Object ID: $CLIENT_ID"
 
     RESULTS_ARRAY+=("$APP_DETAILS")
 
@@ -192,14 +185,14 @@ do
 
         /bin/bash "$APP_ROOT/bin/notify" \
           -t ":dart: Client Credentials Scan Alert for '$APP_NAME'" \
-          -l "App ID: $client_id" \
+          -l "App ID: $CLIENT_ID" \
           -d "The following client credentials are expiring soon or have expired:" \
           -c "#FF0000" \
           -b "$APP_SLACK_SECRET_FIELDS" # Pass the collected fields as JSON string
       fi
     fi
   else
-    print "WARNING" "Could not find details for Client ID: '$client_id'. It might not exist or you lack permissions."
+    print "WARNING" "Could not find details for Client ID: '$CLIENT_ID'. It might not exist or you lack permissions."
   fi
 done
 

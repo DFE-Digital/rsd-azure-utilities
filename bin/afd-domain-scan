@@ -22,7 +22,8 @@ usage () {
   exit 1
 }
 
-while getopts "s" opt; do
+while getopts "s" opt;
+do
   case $opt in
     s)
       AZ_SUBSCRIPTION_SCOPE=$OPTARG
@@ -34,10 +35,12 @@ while getopts "s" opt; do
 done
 
 # Entered a dead-end without user input
-if [ -z "$AZ_SUBSCRIPTION_SCOPE" ]; then
+if [ -z "$AZ_SUBSCRIPTION_SCOPE" ];
+then
   print "ERROR" "You must specify the Subscription ID or Name. Unable to continue."
 
-  if [ "$NOTIFY" == 1 ]; then
+  if [ "$NOTIFY" == 1 ];
+  then
     bash "$APP_ROOT/bin/notify" \
       -t "Error: Azure Subscription ID is not set. Unable to continue."
   fi
@@ -45,7 +48,8 @@ if [ -z "$AZ_SUBSCRIPTION_SCOPE" ]; then
   exit 1
 fi
 
-if [ "$NOTIFY" == 1 ]; then
+if [ "$NOTIFY" == 1 ];
+then
   bash "$APP_ROOT/bin/notify" \
     -t "🎯 *AFD Domain Validation Renewal task started in \`$AZ_SUBSCRIPTION_SCOPE\`*"
 fi
@@ -61,7 +65,8 @@ AFD_LIST=$(
 COUNT_ACTIONED=0
 COUNT_DISMISSED=0
 
-for AZURE_FRONT_DOOR in $AFD_LIST; do
+for AZURE_FRONT_DOOR in $AFD_LIST;
+do
   RESOURCE_GROUP=$(echo "$AZURE_FRONT_DOOR" | jq -rc '.resourceGroup')
   AFD_NAME=$(echo "$AZURE_FRONT_DOOR" | jq -rc '.name')
 
@@ -89,10 +94,12 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
     }'
   )
 
-  if [ "$DOMAINS" ]; then
+  if [ "$DOMAINS" ];
+  then
     SKIP=0
 
-    for DOMAIN in $(echo "$DOMAINS" | jq -c); do
+    for DOMAIN in $(echo "$DOMAINS" | jq -c);
+    do
       DOMAIN_NAME=$(echo "$DOMAIN" | jq -rc '.domain')
       RESOURCE_ID=$(echo "$DOMAIN" | jq -rc '.id')
       STATE=$(echo "$DOMAIN" | jq -rc '.state')
@@ -102,7 +109,8 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
 
       print "INFO" "Domain name: '$DOMAIN_NAME'  |  State: '$STATE'"
 
-      if [ "$STATE" == "Pending" ] || [ "$STATE" == "PendingRevalidation" ]; then
+      if [ "$STATE" == "Pending" ] || [ "$STATE" == "PendingRevalidation" ];
+      then
         print "DEBUG" "Domain validation is in a Pending state"
 
         # Check expiry of existing token
@@ -112,7 +120,8 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
 
         print "DEBUG" "Token $DOMAIN_TOKEN expires on $DOMAIN_VALIDATION_EXPIRY_DATE"
 
-        if [[ "$DOMAIN_VALIDATION_EXPIRY_DATE_COMP" < "$TODAY_COMP" ]]; then
+        if [[ "$DOMAIN_VALIDATION_EXPIRY_DATE_COMP" < "$TODAY_COMP" ]];
+        then
           print "WARNING" "Existing validation token has expired"
           print "INFO" "A new validation token will be requested from Front Door"
 
@@ -142,8 +151,10 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
       fi
 
       # Second check of State due to potential resource refreshed
-      if [ "$STATE" == "Pending" ] && [ "$SKIP" == "0" ]; then
-        if [ "$NOTIFY" == 1 ]; then
+      if [ "$STATE" == "Pending" ] && [ "$SKIP" == "0" ];
+      then
+        if [ "$NOTIFY" == 1 ];
+        then
           bash "$APP_ROOT/bin/notify" \
             -t ":warning: $DOMAIN_NAME is pending revalidation..."
         fi
@@ -181,7 +192,8 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
 
         print "DEBUG" "Existing DNS TXT Record: '$RECORD_SET_CURRENT_TOKEN'"
 
-        if [ "$RECORD_SET_CURRENT_TOKEN" != "$DOMAIN_TOKEN" ]; then
+        if [ "$RECORD_SET_CURRENT_TOKEN" != "$DOMAIN_TOKEN" ];
+        then
           print "DEBUG" "Expected DNS TXT Record: '$DOMAIN_TOKEN'"
           print "INFO" "DNS TXT Record will be automatically updated"
 
@@ -190,7 +202,7 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
             az network dns record-set txt update \
               --zone-name "$DOMAIN_DNS_ZONE_NAME" \
               --name "$RECORD_SET_NAME" \
-              --set "txtRecords[0].value[0]=$DOMAIN_TOKEN" \
+              --set "txtRecords[0].value[0]=\"$DOMAIN_TOKEN\"" \
               --output json \
               --subscription "$AZ_SUBSCRIPTION_SCOPE"  \
               --resource-group "$RESOURCE_GROUP" |
@@ -199,7 +211,8 @@ for AZURE_FRONT_DOOR in $AFD_LIST; do
 
           print "DEBUG" "Set new DNS TXT Record request status: $RECORD_SET_STATE"
 
-          if [ $NOTIFY == 1 ]; then
+          if [ "$NOTIFY" == 1 ];
+          then
             bash "$APP_ROOT/bin/notify" \
               -t "✅ DNS TXT record for $DOMAIN_NAME was updated to \`$DOMAIN_TOKEN\`"
           fi
@@ -215,7 +228,8 @@ done
 
 print "INFO" "Finished execution. $COUNT_ACTIONED domains were updated. $COUNT_DISMISSED domains were valid"
 
-if [ "$NOTIFY" == 1 ]; then
+if [ "$NOTIFY" == 1 ];
+then
   bash "$APP_ROOT/bin/notify" \
     -t "Finished execution. $COUNT_ACTIONED domains were updated. $COUNT_DISMISSED domains were valid"
 fi

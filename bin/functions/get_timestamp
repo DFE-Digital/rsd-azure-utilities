@@ -2,8 +2,10 @@
 
 function get_timestamp {
   local date_string="$1"
-  local os_type=$(uname -s)
-  local use_gdate=$(command -v gdate >/dev/null 2>&1 && echo "Yes" || echo "No")
+  local os_type
+  local use_gdate
+  os_type=$(uname -s)
+  use_gdate=$(command -v gdate >/dev/null 2>&1 && echo "Yes" || echo "No")
 
   if [ "$use_gdate" == "Yes" ];
   then
@@ -19,7 +21,8 @@ function get_timestamp {
         # Azure Key Vault secret expiry dates are typically ISO 8601 (e.g., 2030-04-03T11:35:20+00:00)
         # We need to parse this for macOS's 'date' command.
         # This regex extracts components for precise parsing
-        if [[ "$date_string" =~ ^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(Z|[+-][0-9]{2}:[0-9]{2})$ ]]; then
+        if [[ "$date_string" =~ ^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(Z|[+-][0-9]{2}:[0-9]{2})$ ]];
+        then
           local year="${BASH_REMATCH[1]}"
           local month="${BASH_REMATCH[2]}"
           local day="${BASH_REMATCH[3]}"
@@ -28,16 +31,16 @@ function get_timestamp {
           local second="${BASH_REMATCH[6]}"
           # Construct a string that macOS 'date -j -f' can reliably parse with GMT for timezone normalization
           local macos_date_string="${year} ${month} ${day} ${hour}:${minute}:${second} GMT"
-          date -j -f "%Y %m %d %H:%M:%S %Z" "$macos_date_string" "+%s" 2>/dev/null
-          if [ $? -ne 0 ]; then
+          if ! date -j -f "%Y %m %d %H:%M:%S %Z" "$macos_date_string" "+%s" 2>/dev/null;
+          then
             echo "Error: Failed to convert ISO 8601 date on macOS: $date_string" >&2
             return 1
           fi
         else
           # Fallback for other potential date formats macOS might understand
           # This attempts to clean up common ISO 8601 variations if the regex didn't match
-          date -j -f "%Y-%m-%d %H:%M:%S" "$(echo "$date_string" | sed 's/T/ /g' | sed 's/\.[0-9]*Z//g' | sed 's/Z//g' | sed 's/\+\([0-9]\{2\}\):\([0-9]\{2\}\)$//')" "+%s" 2>/dev/null
-          if [ $? -ne 0 ]; then
+          if ! date -j -f "%Y-%m-%d %H:%M:%S" "$(echo "$date_string" | sed 's/T/ /g' | sed 's/\.[0-9]*Z//g' | sed 's/Z//g' | sed 's/\+\([0-9]\{2\}\):\([0-9]\{2\}\)$//')" "+%s" 2>/dev/null;
+          then
             echo "Error: Failed to convert date string on macOS: $date_string" >&2
             return 1
           fi
