@@ -12,8 +12,14 @@ set -o pipefail
 #   Search an Azure AD for App Registrations that have Client Credentials with
 #   expiry dates. If an expiry date is due within the next 90 days report it
 # Usage:
-#   ./entra-app-scan
+#   ./entra-app-scan [-d <days>]
 ################################################################################
+
+usage () {
+  echo "Usage: $0 [-d <days>]"
+  echo "Options:"
+  echo "  -d <days>   Set the number of days for expiry check (default: 90)"
+}
 
 # Ensure jq and curl are installed
 if ! command -v jq &> /dev/null || ! command -v curl &> /dev/null;
@@ -45,29 +51,45 @@ then
     print "ERROR" "Failed to fetch your Azure AD applications using 'az ad app list --show-mine'. Please ensure you are logged in to Azure CLI and have the necessary permissions."
     exit 1
   fi
-
-  # Check if the temporary file is empty
-  if [ ! -s "$TEMP_CLIENT_IDS_FILE" ];
-  then
-    print "ERROR" "No applications found using 'az ad app list --show-mine'. Exiting."
-    exit 0
-  fi
 else
   print "DEBUG" "Using applications from environment variable 'APP_REGISTRATIONS'."
 
-  # Write the space-separated string from the environment variable to the temporary file,
-  # ensuring each ID is on a new line for the while loop.
-  echo "${!APP_REGISTRATIONS}" | tr ' ' '\n' > "$TEMP_CLIENT_IDS_FILE"
+  echo "$APP_REGISTRATIONS" | tr ' ' '\n' > "$TEMP_CLIENT_IDS_FILE"
+fi
 
-  # Check if the file is empty after parsing (e.g., if env var was set but empty)
-  if [ ! -s "$TEMP_CLIENT_IDS_FILE" ]; then
-    print "ERROR" "'APP_REGISTRATIONS' is set but empty. Please provide Client IDs."
-    exit 1
-  fi
+print "DEBUG" "TEMP_CLIENT_IDS_FILE: $TEMP_CLIENT_IDS_FILE"
+print "DEBUG" "Contents of $TEMP_CLIENT_IDS_FILE before processing:"
+cat "$TEMP_CLIENT_IDS_FILE" | while read -r line; do
+  print "DEBUG" "  > $line"
+done
+
+# Check if the temporary file is empty
+if [ ! -s "$TEMP_CLIENT_IDS_FILE" ];
+then
+  print "ERROR" "No Client IDs are available for processing. Exiting."
+  exit 1
+fi
+
+
+EXPIRY_THRESHOLD_DAYS=90
+
+while getopts "d" opt; do
+  case "$opt" in
+    d)
+      EXPIRY_THRESHOLD_DAYS="$OPTARG"
+      ;;
+    *)
+      usage
+      ;;
+  esac
+done
+
+if ! [[ "$EXPIRY_THRESHOLD_DAYS" =~ ^[0-9]+$ ]]; then
+  print "ERROR" "Expiry threshold must be a positive number."
+  exit 1
 fi
 
 # Set the number of days for expiry check
-EXPIRY_THRESHOLD_DAYS=90
 print "DEBUG" "Expiry threshold in days set to '$EXPIRY_THRESHOLD_DAYS'."
 
 TODAY_DATE=$(get_future_date "0")
