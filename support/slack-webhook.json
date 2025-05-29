@@ -8,15 +8,15 @@
           "type": "section",
           "text": {
             "text": "$LABEL",
-            "type": "plain_text"
+            "type": "mrkdwn"
           }
         },
         {
+          "type": "section",
           "text": {
             "text": "$DESCRIPTION",
             "type": "mrkdwn"
-          },
-          "type": "section"
+          }
         }
       ],
       "color": "$COLOR"

@@ -1,4 +1,5 @@
 #! /bin/bash
+
 set -e
 set -o pipefail
 
@@ -48,6 +49,19 @@ usage () {
   echo "  -b <json_body>     Raw JSON for additional fields (optional, must be valid JSON array of objects)"
   exit 1
 }
+
+if ! command -v print >/dev/null
+then
+  print () {
+    echo "$1: $2"
+  }
+fi
+
+if [ -z "$APP_ROOT" ];
+then
+  APP_ROOT="$( cd "$(dirname "${BASH_SOURCE[0]}")"/../ && pwd -P)"
+fi
+
 # Path to the base Slack webhook JSON template
 SLACK_WEBHOOK_TEMPLATE_PATH="$APP_ROOT/support/slack-webhook.json"
 TEXT=""

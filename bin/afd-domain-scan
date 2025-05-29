@@ -1,5 +1,8 @@
 #! /bin/bash
 
+set -e
+set -o pipefail
+
 ################################################################################
 # Author:
 #   Ash Davies <@DrizzlyOwl>
@@ -14,13 +17,23 @@
 #   ./afd-domain-scan [-s <subscription name>]
 ################################################################################
 
-set -e
-
 usage () {
   echo "Usage: $0 [-s <subscription name>]"
   echo "  -s <subscription name>   Azure Subscription ID or Name (optional)"
   exit 1
 }
+
+if ! command -v print >/dev/null
+then
+  print () {
+    echo "$1: $2"
+  }
+fi
+
+if [ -z "$APP_ROOT" ];
+then
+  APP_ROOT="$( cd "$(dirname "${BASH_SOURCE[0]}")"/../ && pwd -P)"
+fi
 
 while getopts "s" opt;
 do

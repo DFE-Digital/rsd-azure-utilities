@@ -7,10 +7,10 @@ set -o pipefail
 # Author:
 #   Ash Davies <@DrizzlyOwl>
 # Version:
-#   1.0.0
+#   1.1.0
 # Description:
 #   Search an Azure AD for App Registrations that have Client Credentials with
-#   expiry dates. If an expiry date is due within the next 90 days report it
+#   expiry dates. If an expiry date is due within the next X days report it
 # Usage:
 #   ./entra-app-scan [-d <days>]
 ################################################################################
@@ -19,12 +19,47 @@ usage () {
   echo "Usage: $0 [-d <days>]"
   echo "Options:"
   echo "  -d <days>   Set the number of days for expiry check (default: 90)"
+  exit 1
 }
 
-# Define a temporary file to store client IDs if fetched from --show-mine
+if ! command -v print >/dev/null;
+then
+  print () {
+    echo "$1: $2"
+  }
+fi
+
+if [ -z "$APP_ROOT" ];
+then
+  APP_ROOT="$( cd "$(dirname "${BASH_SOURCE[0]}")"/../ && pwd -P)"
+fi
+
+# --- START Configuration ---
+LOOK_AHEAD_DAYS=90
+NOTIFY_SCRIPT_PATH="$APP_ROOT/bin/notify"
+# --- END Configuration ---
+
+while getopts "d:" opt; do
+  case "$opt" in
+    d)
+      LOOK_AHEAD_DAYS="$OPTARG"
+      ;;
+    *)
+      usage
+      ;;
+  esac
+done
+shift $((OPTIND-1)) # Shift processed options
+
+if ! [[ "$LOOK_AHEAD_DAYS" =~ ^[0-9]+$ ]];
+then
+  print "ERROR" "Expiry threshold (-d) must be a positive number. Value provided: '$LOOK_AHEAD_DAYS'"
+  exit 1
+fi
+
+# Define a temporary file to store client IDs
 TEMP_CLIENT_IDS_FILE=$(mktemp)
-# Ensure the temporary file is deleted on exit
-trap 'rm -f "$TEMP_CLIENT_IDS_FILE"' EXIT
+trap 'rm -f "$TEMP_CLIENT_IDS_FILE"' EXIT # Ensure the temporary file is deleted on exit
 
 # Read Client IDs from an environment variable.
 # The environment variable should contain a space-separated list of Client IDs.
@@ -41,7 +76,18 @@ then
     --query "[].appId" \
     -o tsv > "$TEMP_CLIENT_IDS_FILE";
   then
-    print "ERROR" "Failed to fetch your Azure AD applications using 'az ad app list --show-mine'. Please ensure you are logged in to Azure CLI and have the necessary permissions."
+    MSG="Failed to fetch your Azure AD applications using 'az ad app list --show-mine'. Please ensure you are logged in to Azure CLI and have the necessary permissions."
+    print "ERROR" "$MSG"
+
+    if [ "$NOTIFY" == 1 ] && [ -f "$NOTIFY_SCRIPT_PATH" ];
+    then
+      bash "$NOTIFY_SCRIPT_PATH" \
+        -t "🎯 *Entra Client Credentials Expiry Scan task failed to start*" \
+        -l "*Error:* Startup error" \
+        -d "*Fatal:* $MSG" \
+        -c "#FF0000"
+    fi
+
     exit 1
   fi
 else
@@ -50,53 +96,40 @@ else
   echo "$APP_REGISTRATIONS" | tr ' ' '\n' > "$TEMP_CLIENT_IDS_FILE"
 fi
 
-print "DEBUG" "TEMP_CLIENT_IDS_FILE: $TEMP_CLIENT_IDS_FILE"
-print "DEBUG" "Contents of $TEMP_CLIENT_IDS_FILE before processing:"
-while read -r line; do
-  print "DEBUG" "  > $line"
-done < "$TEMP_CLIENT_IDS_FILE"
-
-# Check if the temporary file is empty
 if [ ! -s "$TEMP_CLIENT_IDS_FILE" ];
 then
-  print "ERROR" "No Client IDs are available for processing. Exiting."
+  MSG="No Client IDs are available for processing. Unable to continue."
+  print "ERROR" "$MSG"
+
+  if [ "$NOTIFY" == 1 ] && [ -f "$NOTIFY_SCRIPT_PATH" ];
+  then
+    bash "$NOTIFY_SCRIPT_PATH" \
+      -t "🎯 *Entra Client Credentials Expiry Scan task failed to start*" \
+      -l "*Error:* Startup error" \
+      -d "*Fatal:* $MSG" \
+      -c "#FF0000"
+  fi
+
   exit 1
 fi
 
+# Date calculations for comparison (YYYYMMDD integer format)
+TODAY_DATE_ISO=$(get_future_date "0") # Expects YYYY-MM-DDTHH:MM:SS...
+TODAY_DATE_YMD=${TODAY_DATE_ISO:0:10} # Extracts YYYY-MM-DD
+TODAY_DATE_INT=${TODAY_DATE_YMD//-/}  # Converts to YYYYMMDD
 
-EXPIRY_THRESHOLD_DAYS=90
+FUTURE_DATE_ISO=$(get_future_date "$LOOK_AHEAD_DAYS")
+FUTURE_DATE_YMD=${FUTURE_DATE_ISO:0:10}
+FUTURE_DATE_INT=${FUTURE_DATE_YMD//-/}
 
-while getopts "d" opt; do
-  case "$opt" in
-    d)
-      EXPIRY_THRESHOLD_DAYS="$OPTARG"
-      ;;
-    *)
-      usage
-      ;;
-  esac
-done
-
-if ! [[ "$EXPIRY_THRESHOLD_DAYS" =~ ^[0-9]+$ ]];
-then
-  print "ERROR" "Expiry threshold must be a positive number."
-  exit 1
-fi
-
-# Set the number of days for expiry check
-print "DEBUG" "Expiry threshold in days set to '$EXPIRY_THRESHOLD_DAYS'."
-
-TODAY_DATE=$(get_future_date "0")
-TODAY_DATE_YMD=${TODAY_DATE:0:10}
-TODAY_DATE=${TODAY_DATE_YMD//-/}
-FUTURE_DATE=$(get_future_date "$EXPIRY_THRESHOLD_DAYS")
-FUTURE_DATE_YMD=${FUTURE_DATE:0:10}
-FUTURE_DATE=${FUTURE_DATE_YMD//-/}
 print "DEBUG" "Client Credentials with an expiry date on or before $FUTURE_DATE_YMD will be reported."
 
-EXPIRING_SECRETS_FOUND=false
-SECRET_EXPIRING_SOON_COUNT=0
-SECRET_EXPIRED_COUNT=0
+ALL_PROBLEM_CREDENTIAL_FIELDS="[]" # JSON array string for all problematic credential fields
+EXPIRING_SECRETS_FOUND_GLOBAL=false # Global flag if any problematic secret is found
+
+# Your existing global counters are good:
+SECRET_EXPIRING_SOON_COUNT_GLOBAL=0
+SECRET_EXPIRED_COUNT_GLOBAL=0
 
 # Initialize an empty array to store results
 declare -a RESULTS_ARRAY=()
@@ -112,9 +145,6 @@ do
       continue
   fi
 
-  APP_EXPIRING_SECRETS_FOUND=false
-  APP_SLACK_SECRET_FIELDS=''
-
   print "INFO" "Retrieving details for Client ID: '$CLIENT_ID'."
 
   if APP_DETAILS=$(az ad app list \
@@ -123,74 +153,63 @@ do
     -o json 2>/dev/null) && [ -n "$APP_DETAILS" ] && [ "$APP_DETAILS" != "null" ];
   then
     APP_NAME=$(echo "$APP_DETAILS" | jq -r '.displayName')
-    SECRETS_JSON=$(echo "$APP_DETAILS" | jq -r '.passwordCredentials')
-    APP_EXPIRING_SECRETS_FOUND=false
-    APP_SLACK_SECRET_FIELDS=''
+    APP_SECRETS=$(echo "$APP_DETAILS" | jq -r '.passwordCredentials')
+
+    # Construct the text for this specific credential, including App context
+    SLACK_SECRET_AZURE_LINK="<https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Credentials/appId/$CLIENT_ID|$APP_NAME>"
 
     print "DEBUG" "Display Name: $APP_NAME"
     print "DEBUG" "Object ID: $CLIENT_ID"
 
     RESULTS_ARRAY+=("$APP_DETAILS")
 
-    while IFS= read -r secret_json;
+    while IFS= read -r secret_item_json;
     do
-      SECRET_NAME=$(echo "$secret_json" | jq -r '.displayName')
-      SECRET_EXPIRY_DATE_STRING=$(echo "$secret_json" | jq -r '.endDateTime')
+      SECRET_NAME=$(echo "$secret_item_json" | jq -r '.displayName')
+      SECRET_EXPIRY_DATE_STRING=$(echo "$secret_item_json" | jq -r '.endDateTime')
       SECRET_EXPIRY_DATE_YMD=${SECRET_EXPIRY_DATE_STRING:0:10}
-      SECRET_EXPIRY_DATE=${SECRET_EXPIRY_DATE_YMD//-/}
-      SECRET_EXPIRY_DIFF_FUTURE=$((SECRET_EXPIRY_DATE-FUTURE_DATE))
-      SECRET_EXPIRY_DIFF_NOW=$((SECRET_EXPIRY_DATE-TODAY_DATE))
+      SECRET_EXPIRY_DATE_INT=${SECRET_EXPIRY_DATE_YMD//-/} # Integer for comparison
 
-      if [[ "$SECRET_EXPIRY_DIFF_NOW" -le "0" ]];
+      # Set local defaults for the current secret item
+      SECRET_STATE_EMOJI=":white_check_mark:"
+      LOCAL_SECRET_STATUS="Valid"
+
+      if [[ "$SECRET_EXPIRY_DATE_INT" -le "$TODAY_DATE_INT" ]];
       then
         SECRET_STATE_EMOJI=":octagonal_sign:"
-        SECRET_EXPIRED_COUNT=$((SECRET_EXPIRED_COUNT+1))
+        SECRET_EXPIRED_COUNT_GLOBAL=$((SECRET_EXPIRED_COUNT_GLOBAL+1))
+        LOCAL_SECRET_STATUS="Expired"
+
         print "WARNING" "'$SECRET_NAME' expired on $SECRET_EXPIRY_DATE_STRING"
-      elif [[ "$SECRET_EXPIRY_DIFF_FUTURE" -le "0" ]];
+      elif [[ "$SECRET_EXPIRY_DATE_INT" -le "$FUTURE_DATE_INT" ]];
       then
         SECRET_STATE_EMOJI=":warning:"
-        SECRET_EXPIRING_SOON_COUNT=$((SECRET_EXPIRING_SOON_COUNT+1))
-        print "WARNING" "'$SECRET_NAME' expiring in the next $EXPIRY_THRESHOLD_DAYS days"
+        SECRET_EXPIRING_SOON_COUNT_GLOBAL=$((SECRET_EXPIRING_SOON_COUNT_GLOBAL+1))
+        LOCAL_SECRET_STATUS="Expiring soon"
+
+        print "WARNING" "'$SECRET_NAME' expiring in the next $LOOK_AHEAD_DAYS days"
       else
-        SECRET_STATE_EMOJI=":white_check_mark:"
         print "INFO" "'$SECRET_NAME' valid until $SECRET_EXPIRY_DATE_STRING"
       fi
 
-      if [[ "$SECRET_EXPIRY_DATE" -le "$FUTURE_DATE" ]];
+      # This is where we collect data for the consolidated Slack message
+      if [ "$LOCAL_SECRET_STATUS" != "Valid" ];
       then
-        APP_EXPIRING_SECRETS_FOUND=true
+        EXPIRING_SECRETS_FOUND_GLOBAL=true # Set the global flag
+        FIELD_TEXT_FOR_SLACK="$SECRET_STATE_EMOJI \`$SECRET_NAME\` in $SLACK_SECRET_AZURE_LINK ($SECRET_EXPIRY_DATE_YMD)"
 
-        # Create a single field object
-        NEW_FIELD=$(jq -n --arg secret_name "$SECRET_STATE_EMOJI *Secret Name:* $SECRET_NAME" --arg expiry_date ":alarm_clock: *Expiry Date:* $SECRET_EXPIRY_DATE_YMD" '{
+        NEW_FIELD_JSON_OBJECT=$(jq -n --arg text_content "$FIELD_TEXT_FOR_SLACK" '{
           "type": "mrkdwn",
-          "text": ($secret_name + "\n" + $expiry_date)
+          "text": $text_content
         }')
 
-        if [ -z "$APP_SLACK_SECRET_FIELDS" ]; then
-          APP_SLACK_SECRET_FIELDS="[$NEW_FIELD]"
-        else
-          # Append the new field to the existing JSON array of fields
-          APP_SLACK_SECRET_FIELDS=$(jq -n --argjson existing "$APP_SLACK_SECRET_FIELDS" --argjson new "$NEW_FIELD" '$existing + [$new]')
-        fi
+        # Append the new field object to the global list of fields
+        ALL_PROBLEM_CREDENTIAL_FIELDS=$(jq -n \
+          --argjson existing_fields "$ALL_PROBLEM_CREDENTIAL_FIELDS" \
+          --argjson new_field "$NEW_FIELD_JSON_OBJECT" \
+          '$existing_fields + [$new_field]')
       fi
-    done < <(echo "$SECRETS_JSON" | jq -c '.[]')
-
-    if [ "$(echo "$SECRETS_JSON" | jq 'length')" -lt 1 ];
-    then
-      print "INFO" "No client credentials found"
-    else
-      if [ "$APP_EXPIRING_SECRETS_FOUND" = true ];
-      then
-        EXPIRING_SECRETS_FOUND=true
-
-        /bin/bash "$APP_ROOT/bin/notify" \
-          -t ":dart: Client Credentials Scan Alert for '$APP_NAME'" \
-          -l "App ID: $CLIENT_ID" \
-          -d "The following client credentials are expiring soon or have expired:" \
-          -c "#FF0000" \
-          -b "$APP_SLACK_SECRET_FIELDS" # Pass the collected fields as JSON string
-      fi
-    fi
+    done < <(echo "$APP_SECRETS" | jq -c '.[]')
   else
     print "WARNING" "Could not find details for Client ID: '$CLIENT_ID'. It might not exist or you lack permissions."
   fi
@@ -199,33 +218,44 @@ done
 exec 3<&-
 
 # Send Slack notification
-if [ "$EXPIRING_SECRETS_FOUND" = false ];
+if [ "$EXPIRING_SECRETS_FOUND_GLOBAL" = false ];
 then
-  print "INFO" "No client secrets found expiring within the next $EXPIRY_THRESHOLD_DAYS days."
+  print "INFO" "No client secrets found expiring within the next $LOOK_AHEAD_DAYS days."
 fi
 
-APP_REGISTRATIONS_COUNT=${#RESULTS_ARRAY[@]}
+exec 3<&-
 
-# Determine summary message and color
-SUMMARY_COLOR="#007fff" # Default blue/info
-if [ "$SECRET_EXPIRED_COUNT" -gt 0 ]; then
-  SUMMARY_COLOR="#FF0000" # Red for expired
-elif [ "$SECRET_EXPIRING_SOON_COUNT" -gt 0 ]; then
-  SUMMARY_COLOR="#FFA500" # Orange for expiring soon
+APP_REGISTRATIONS_PROCESSED_COUNT=${#RESULTS_ARRAY[@]}
+
+NOTIFY_SLACK_HEADING="🎯 *Entra Client Credentials Expiry Scan task started*"
+NOTIFY_SLACK_LABEL="Finished scanning $APP_REGISTRATIONS_PROCESSED_COUNT App Registrations."
+NOTIFY_SLACK_DESCRIPTION="$SECRET_EXPIRING_SOON_COUNT_GLOBAL client credentials are expiring soon (next $LOOK_AHEAD_DAYS days). $SECRET_EXPIRED_COUNT_GLOBAL have expired."
+NOIFY_SLACK_COLOR="#007fff"
+
+if [ "$SECRET_EXPIRED_COUNT_GLOBAL" -gt 0 ]; then
+  NOIFY_SLACK_COLOR="#FF0000"
+elif [ "$SECRET_EXPIRING_SOON_COUNT_GLOBAL" -gt 0 ]; then
+  NOIFY_SLACK_COLOR="#FFA500"
+else
+  NOIFY_SLACK_COLOR="#36A64F"
+  NOTIFY_SLACK_DESCRIPTION="No client credentials found expiring or expired within the next $LOOK_AHEAD_DAYS days."
 fi
 
-SUMMARY_MESSAGE="Finished scanning $APP_REGISTRATIONS_COUNT App Registrations."
-SUMMARY_DESCRIPTION="$SECRET_EXPIRING_SOON_COUNT client credentials are expiring soon. $SECRET_EXPIRED_COUNT have expired."
-
-/bin/bash "$APP_ROOT/bin/notify" \
-  -t "Client Credentials Scan Summary" \
-  -l "$SUMMARY_MESSAGE" \
-  -d "$SUMMARY_DESCRIPTION" \
-  -c "$SUMMARY_COLOR"
-
-print "INFO" "$SUMMARY_MESSAGE $SUMMARY_DESCRIPTION"
-
-if [ "$EXPIRING_SECRETS_FOUND" = false ] && [ "$SECRET_EXPIRING_SOON_COUNT" -eq 0 ] && [ "$SECRET_EXPIRED_COUNT" -eq 0 ];
-then
-  print "INFO" "No client secrets found expiring within the next $EXPIRY_THRESHOLD_DAYS days."
+if [ "$NOTIFY" == 1 ] && [ -f "$NOTIFY_SCRIPT_PATH" ] && [ -x "$NOTIFY_SCRIPT_PATH" ]; then
+  if [ "$EXPIRING_SECRETS_FOUND_GLOBAL" = true ]; then
+    bash "$NOTIFY_SCRIPT_PATH" \
+      -t "$NOTIFY_SLACK_HEADING" \
+      -l "*Result:* $NOTIFY_SLACK_LABEL" \
+      -d "*Message:* $NOTIFY_SLACK_DESCRIPTION" \
+      -c "$NOIFY_SLACK_COLOR" \
+      -b "$ALL_PROBLEM_CREDENTIAL_FIELDS"
+  else
+    bash "$NOTIFY_SCRIPT_PATH" \
+      -t "$NOTIFY_SLACK_HEADING" \
+      -l "*Result:* $NOTIFY_SLACK_LABEL" \
+      -d "*Message:* $NOTIFY_SLACK_DESCRIPTION" \
+      -c "$NOIFY_SLACK_COLOR"
+  fi
 fi
+
+print "INFO" "$NOTIFY_SLACK_LABEL $NOTIFY_SLACK_DESCRIPTION"

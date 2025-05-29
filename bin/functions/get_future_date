@@ -3,15 +3,24 @@
 function get_future_date {
   local days="$1"
   local os_type
-  os_type=$(uname -s)
 
-  if [[ "$os_type" == "Darwin" ]];
-  then
-    gdate -j -f "%Y-%m-%d" "$(date +%Y-%m-%d)" "+%Y-%m-%dT23:59:59Z" -v+"$days"d 2>/dev/null || date -v+"$days"d +%Y-%m-%dT23:59:59Z
-  elif command -v gdate &> /dev/null;
-  then
-    gdate -d "today + $days days" "+%Y-%m-%dT23:59:59Z"
+  # Desired output format (always ends in 23:59:59Z for consistency)
+  local output_format="+%Y-%m-%dT23:59:59Z"
+
+  if command -v gdate &> /dev/null; then
+    # If gdate (GNU date) is available, use it (preferred)
+    gdate -d "today + $days days" "$output_format"
   else
-    date -d "$days days" +%Y-%m-%dT23:59:59Z
+    # gdate not found, use OS-specific date command
+    os_type=$(uname -s)
+
+    if [[ "$os_type" == "Darwin" ]];
+    then
+      # macOS native 'date'
+      date -v+"$days"d "$output_format"
+    else
+      # Linux native 'date' (usually GNU date compatible)
+      date -d "today + $days days" "$output_format"
+    fi
   fi
 }
