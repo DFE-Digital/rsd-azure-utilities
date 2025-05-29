@@ -7,7 +7,7 @@ set -o pipefail
 # Author:
 #   Ash Davies <@DrizzlyOwl>
 # Version:
-#   1.0.0
+#   1.1.0
 # Description:
 #   Search an Azure Subscription for Azure Front Door Custom Domains that are
 #   secured using Azure Managed TLS Certificates. If the Custom Domain is in a
@@ -23,7 +23,7 @@ usage () {
   exit 1
 }
 
-if ! command -v print >/dev/null
+if ! command -v print >/dev/null;
 then
   print () {
     echo "$1: $2"
@@ -35,7 +35,12 @@ then
   APP_ROOT="$( cd "$(dirname "${BASH_SOURCE[0]}")"/../ && pwd -P)"
 fi
 
-while getopts "s" opt;
+# --- START Configuration ---
+NOTIFY_SCRIPT_PATH="$APP_ROOT/bin/notify"
+TODAY=$(date "+%Y-%m-%d")
+# --- END Configuration ---
+
+while getopts "s:" opt;
 do
   case $opt in
     s)
@@ -46,59 +51,101 @@ do
       ;;
   esac
 done
+shift $((OPTIND-1)) # Shift processed options
 
 # Entered a dead-end without user input
 if [ -z "$AZ_SUBSCRIPTION_SCOPE" ];
 then
-  print "ERROR" "You must specify the Subscription ID or Name. Unable to continue."
+  MSG="You must specify the Subscription ID or Name. Unable to continue."
 
-  if [ "$NOTIFY" == 1 ];
+  if [ "$NOTIFY" == 1 ] && [ -f "$NOTIFY_SCRIPT_PATH" ];
   then
-    bash "$APP_ROOT/bin/notify" \
-      -t "Error: Azure Subscription ID is not set. Unable to continue."
+    bash "$NOTIFY_SCRIPT_PATH" \
+      -t "🎯 *AFD Domain Validation Renewal task failed to start*" \
+      -l "*Error:* Missing required option" \
+      -d "*Message:* $MSG" \
+      -c "#FF0000"
+  fi
+
+  print "ERROR" "$MSG"
+
+  exit 1
+fi
+
+# --- START Slack specific variables ---
+ALL_DOMAIN_EVENT_FIELDS="[]" # JSON array string for notify -b option
+NOTIFY_SLACK_HEADING="🎯 *AFD Domain Validation Renewal task started in \`$AZ_SUBSCRIPTION_SCOPE\`*"
+# --- END Slack specific variables ---
+
+# Find all Azure Front Doors within the specified subscription
+print "INFO" "Fetching Azure Front Door profiles from subscription '$AZ_SUBSCRIPTION_SCOPE'..."
+
+if ! AFD_LIST_JSON=$( \
+  az afd profile list \
+    --subscription "$AZ_SUBSCRIPTION_SCOPE" \
+    --only-show-errors \
+    --output json \
+);
+then
+  MSG="Failed to list Azure Front Door profiles in subscription '$AZ_SUBSCRIPTION_SCOPE'. Check Azure CLI login and permissions."
+  print "ERROR" "$MSG"
+
+  if [ "$NOTIFY" == 1 ] && [ -f "$NOTIFY_SCRIPT_PATH" ];
+  then
+    bash "$NOTIFY_SCRIPT_PATH" \
+      -t "🎯 *AFD Domain Validation Renewal task failed to start*" \
+      -l "*Error:* AFD Profile List Failed" \
+      -d "*Message:* $MSG" \
+      -c "#FF0000"
   fi
 
   exit 1
 fi
 
-if [ "$NOTIFY" == 1 ];
-then
-  bash "$APP_ROOT/bin/notify" \
-    -t "🎯 *AFD Domain Validation Renewal task started in \`$AZ_SUBSCRIPTION_SCOPE\`*"
-fi
-
-# Find all Azure Front Doors within the specified subscription
-AFD_LIST=$(
-  az afd profile list \
-    --only-show-errors \
-    --subscription "$AZ_SUBSCRIPTION_SCOPE" |
-  jq -rc '.[] | { "name": .name, "resourceGroup": .resourceGroup }'
-)
-
+COUNT_AFD=$(echo "$AFD_LIST_JSON" | jq 'length')
 COUNT_ACTIONED=0
 COUNT_DISMISSED=0
 
-for AZURE_FRONT_DOOR in $AFD_LIST;
+if [ "$COUNT_AFD" -eq 0 ];
+then
+  MSG="No Azure Front Door profiles found in subscription '$AZ_SUBSCRIPTION_SCOPE'."
+  print "INFO" "$MSG"
+
+  if [ "$NOTIFY" == 1 ] && [ -f "$NOTIFY_SCRIPT_PATH" ];
+  then
+    bash "$NOTIFY_SCRIPT_PATH" \
+      -t "$NOTIFY_SLACK_HEADING" \
+      -l "*Result:* No AFD Profiles to scan" \
+      -d "*Message:* $MSG" \
+      -c "#007fff" # Blue/Info
+  fi
+
+  exit 0
+fi
+
+while IFS= read -r AZURE_FRONT_DOOR_JSON;
 do
-  RESOURCE_GROUP=$(echo "$AZURE_FRONT_DOOR" | jq -rc '.resourceGroup')
-  AFD_NAME=$(echo "$AZURE_FRONT_DOOR" | jq -rc '.name')
+  RESOURCE_GROUP=$(echo "$AZURE_FRONT_DOOR_JSON" | jq -rc '.resourceGroup')
+  AFD_NAME=$(echo "$AZURE_FRONT_DOOR_JSON" | jq -rc '.name')
 
   print "INFO" "Scanning Azure Front Door: '$AFD_NAME' in Resource Group: '$RESOURCE_GROUP'."
 
-  # Grab all the custom domains attached to the Azure Front Door
-  ALL_CUSTOM_DOMAINS=$(
+  ALL_CUSTOM_DOMAINS_JSON=""
+  if ! ALL_CUSTOM_DOMAINS_JSON=$(
     az afd custom-domain list \
       --profile-name "$AFD_NAME" \
-      --output json \
-      --only-show-errors \
+      --resource-group "$RESOURCE_GROUP" \
       --subscription "$AZ_SUBSCRIPTION_SCOPE" \
-      --resource-group "$RESOURCE_GROUP"
-  )
+      --output json \
+      --only-show-errors
+  ); then
+    print "WARNING" "Failed to list custom domains for AFD '$AFD_NAME'. Continuing with the next AFD."
+    continue
+  fi
 
-  # Create a new list of domains where TLS certificate type is Azure 'managed'
-  DOMAINS=$(
-    echo "$ALL_CUSTOM_DOMAINS" |
-    jq -rc '.[] | select(.tlsSettings.certificateType = "ManagedCertificate") | {
+  MANAGED_DOMAINS_JSON_DATA=$(
+    echo "$ALL_CUSTOM_DOMAINS_JSON" | \
+    jq -c '.[] | select(.tlsSettings.certificateType == "ManagedCertificate") | {
       "domain": .hostName,
       "id": .id,
       "validationProperties": .validationProperties,
@@ -107,142 +154,165 @@ do
     }'
   )
 
-  if [ "$DOMAINS" ];
-  then
-    SKIP=0
+  if [ -z "$MANAGED_DOMAINS_JSON_DATA" ]; then
+    print "INFO" "No custom domains with managed certificates found for AFD '$AFD_NAME'."
+    continue
+  fi
 
-    for DOMAIN in $(echo "$DOMAINS" | jq -c);
-    do
-      DOMAIN_NAME=$(echo "$DOMAIN" | jq -rc '.domain')
-      RESOURCE_ID=$(echo "$DOMAIN" | jq -rc '.id')
-      STATE=$(echo "$DOMAIN" | jq -rc '.state')
-      DOMAIN_VALIDATION_EXPIRY=$(echo "$DOMAIN" | jq -rc '.validationProperties.expirationDate')
-      DOMAIN_TOKEN=$(echo "$DOMAIN" | jq -rc '.validationProperties.validationToken')
-      DOMAIN_DNS_ZONE_ID=$(echo "$DOMAIN" | jq -rc '.azureDnsZone.id')
+  while IFS= read -r DOMAIN;
+  do
+    DOMAIN_NAME=$(echo "$DOMAIN" | jq -rc '.domain')
+    RESOURCE_ID=$(echo "$DOMAIN" | jq -rc '.id')
+    STATE=$(echo "$DOMAIN" | jq -rc '.state')
+    DOMAIN_VALIDATION_EXPIRY=$(echo "$DOMAIN" | jq -rc '.validationProperties.expirationDate')
+    TOKEN=$(echo "$DOMAIN" | jq -rc '.validationProperties.validationToken')
+    DOMAIN_DNS_ZONE_ID=$(echo "$DOMAIN" | jq -rc '.azureDnsZone.id')
 
-      print "INFO" "Domain name: '$DOMAIN_NAME'  |  State: '$STATE'"
+    DOMAIN_EVENT_DETAILS="*Domain:* \`$DOMAIN_NAME\` (AFD: \`$AFD_NAME\`)\n*Initial State:* $STATE\n"
+    ACTION_TAKEN_FLAG=false
 
-      if [ "$STATE" == "Pending" ] || [ "$STATE" == "PendingRevalidation" ];
+    print "INFO" "Domain name: '$DOMAIN_NAME'  |  State: '$STATE'"
+
+    if [ "$STATE" == "Pending" ] || [ "$STATE" == "PendingRevalidation" ];
+    then
+      ACTION_TAKEN_FLAG=true
+
+      # Check expiry of existing token
+      DOMAIN_VALIDATION_EXPIRY_DATE=${DOMAIN_VALIDATION_EXPIRY:0:10}
+      DOMAIN_VALIDATION_EXPIRY_DATE_COMP=${DOMAIN_VALIDATION_EXPIRY_DATE//-/}
+      TODAY_COMP=${TODAY//-/} # TODAY is YYYY-MM-DD, convert to YYYYMMDD
+
+      print "DEBUG" "Token $TOKEN expires on $DOMAIN_VALIDATION_EXPIRY_DATE"
+
+      if [[ "$DOMAIN_VALIDATION_EXPIRY_DATE_COMP" < "$TODAY_COMP" ]];
       then
-        print "DEBUG" "Domain validation is in a Pending state"
+        print "WARNING" "Existing validation token has expired. Requesting new token"
 
-        # Check expiry of existing token
-        DOMAIN_VALIDATION_EXPIRY_DATE=${DOMAIN_VALIDATION_EXPIRY:0:10}
-        DOMAIN_VALIDATION_EXPIRY_DATE_COMP=${DOMAIN_VALIDATION_EXPIRY_DATE//-/}
-        TODAY_COMP=${TODAY//-/}
-
-        print "DEBUG" "Token $DOMAIN_TOKEN expires on $DOMAIN_VALIDATION_EXPIRY_DATE"
-
-        if [[ "$DOMAIN_VALIDATION_EXPIRY_DATE_COMP" < "$TODAY_COMP" ]];
+        if az afd custom-domain regenerate-validation-token --ids "$RESOURCE_ID" --output none --only-show-errors;
         then
-          print "WARNING" "Existing validation token has expired"
-          print "INFO" "A new validation token will be requested from Front Door"
-
-          # Regenerate token
-          az afd custom-domain regenerate-validation-token \
-            --ids "$RESOURCE_ID" \
-            --output json
-
-          # Refresh the $DOMAIN resource which will have a new token
-          DOMAIN=$(
-            az afd custom-domain show \
-              --ids "$RESOURCE_ID" \
-              --output json \
-              --only-show-errors
-          )
-
-          STATE=$(echo "$DOMAIN" | jq -rc '.domainValidationState')
+            DOMAIN=$(az afd custom-domain show --ids "$RESOURCE_ID" --output json --only-show-errors)
+            STATE=$(echo "$DOMAIN" | jq -rc '.domainValidationState')
+            TOKEN=$(echo "$DOMAIN" | jq -rc '.validationProperties.validationToken') # This is now the new token
+            print "INFO" "Token regenerated. New State: $STATE, New Token: $TOKEN"
+            DOMAIN_EVENT_DETAILS+="*New State:* $STATE. *New Token:* \`$TOKEN\`\n"
         else
-          print "INFO" "Existing validation token is still valid and can be re-used"
+            print "ERROR" "Failed to regenerate validation token for '$DOMAIN_NAME'."
+            DOMAIN_EVENT_DETAILS+="*Token Status:* Regeneration failed.\n"
         fi
-
-        COUNT_ACTIONED=$((COUNT_ACTIONED+1))
-        SKIP=0
       else
-        COUNT_DISMISSED=$((COUNT_DISMISSED+1))
-        SKIP=1
+        print "INFO" "Existing validation token is still valid and can be re-used"
+        DOMAIN_EVENT_DETAILS+="*Token Status:* Valid (\`$TOKEN\`). Re-using.\n"
       fi
 
-      # Second check of State due to potential resource refreshed
-      if [ "$STATE" == "Pending" ] && [ "$SKIP" == "0" ];
+      if
+        [ -n "$TOKEN" ] &&
+        [ "$DOMAIN_DNS_ZONE_ID" != "null" ] &&
+        [ -n "$DOMAIN_DNS_ZONE_ID" ];
       then
-        if [ "$NOTIFY" == 1 ];
+        DOMAIN_DNS_ZONE_NAME=$(az network dns zone show --ids "$DOMAIN_DNS_ZONE_ID" --query name -o tsv --only-show-errors 2>/dev/null || echo "")
+
+        if [ -n "$DOMAIN_DNS_ZONE_NAME" ];
         then
-          bash "$APP_ROOT/bin/notify" \
-            -t ":warning: $DOMAIN_NAME is pending revalidation..."
-        fi
+          RECORD_SET_NAME_TMP=${DOMAIN_NAME//${DOMAIN_DNS_ZONE_NAME}/}
+          RECORD_SET_NAME_TMP="_dnsauth.${RECORD_SET_NAME_TMP}"
+          RECORD_SET_NAME=${RECORD_SET_NAME_TMP/%./}
 
-        # Grab the new or existing token
-        DOMAIN_TOKEN=$(echo "$DOMAIN" | jq -rc '.validationProperties.validationToken')
-        print "DEBUG" "Validation token: '$DOMAIN_TOKEN'"
-
-        # Locate the DNS zone that holds the TXT Record Set
-        DOMAIN_DNS_ZONE=$(
-          az network dns zone show \
-            --ids "$DOMAIN_DNS_ZONE_ID" \
-            --output json \
-            --only-show-errors |
-          jq -rc '{ "name": .name, "etag": .etag }'
-        )
-
-        # Handle subdomains by extracting the primary DNS Zone name
-        # from the domain name to determine the validation record name
-        DOMAIN_DNS_ZONE_NAME=$(echo "$DOMAIN_DNS_ZONE" | jq -rc '.name')
-        RECORD_SET_NAME_TMP=${DOMAIN_NAME//${DOMAIN_DNS_ZONE_NAME}/}
-        RECORD_SET_NAME_TMP="_dnsauth.${RECORD_SET_NAME_TMP}"
-        RECORD_SET_NAME=${RECORD_SET_NAME_TMP/%./}
-
-        # Get the existing record to determine if we need to do anything
-        RECORD_SET_CURRENT_TOKEN=$(
-          az network dns record-set txt show \
+          # Get the existing record to determine if we need to do anything
+          RECORD_SET_CURRENT_DNS_TOKEN=$(az network dns record-set txt show \
             --zone-name "$DOMAIN_DNS_ZONE_NAME" \
             --name "$RECORD_SET_NAME" \
-            --output json \
             --subscription "$AZ_SUBSCRIPTION_SCOPE"  \
-            --resource-group "$RESOURCE_GROUP" |
-          jq -rc '.TXTRecords[0].value[0]'
-        )
-
-        print "DEBUG" "Existing DNS TXT Record: '$RECORD_SET_CURRENT_TOKEN'"
-
-        if [ "$RECORD_SET_CURRENT_TOKEN" != "$DOMAIN_TOKEN" ];
-        then
-          print "DEBUG" "Expected DNS TXT Record: '$DOMAIN_TOKEN'"
-          print "INFO" "DNS TXT Record will be automatically updated"
-
-          # Update the DNS record with the validation token
-          RECORD_SET_STATE=$(
-            az network dns record-set txt update \
-              --zone-name "$DOMAIN_DNS_ZONE_NAME" \
-              --name "$RECORD_SET_NAME" \
-              --set "txtRecords[0].value[0]=\"$DOMAIN_TOKEN\"" \
-              --output json \
-              --subscription "$AZ_SUBSCRIPTION_SCOPE"  \
-              --resource-group "$RESOURCE_GROUP" |
-            jq -rc '.provisioningState'
+            --resource-group "$RESOURCE_GROUP" \
+            --query "txtRecords[0].value[0]" -o tsv --only-show-errors 2>/dev/null || echo "NOT_FOUND"
           )
 
-          print "DEBUG" "Set new DNS TXT Record request status: $RECORD_SET_STATE"
-
-          if [ "$NOTIFY" == 1 ];
+          if [ "$RECORD_SET_CURRENT_DNS_TOKEN" != "$TOKEN" ];
           then
-            bash "$APP_ROOT/bin/notify" \
-              -t "✅ DNS TXT record for $DOMAIN_NAME was updated to \`$DOMAIN_TOKEN\`"
+            DOMAIN_EVENT_DETAILS+="*DNS Action:* Updating TXT record to \`$TOKEN\`.\n"
+
+            if [ "$RECORD_SET_CURRENT_DNS_TOKEN" == "NOT_FOUND" ];
+            then
+              print "DEBUG" "Record set '$RECORD_SET_NAME' not found, will attempt to create."
+            else
+              print "INFO" "Record set '$DOMAIN_NAME' needs updating, will attempt to update."
+            fi
+
+            RECORD_SET_PROVISIONING_STATE=$(az network dns record-set txt update \
+              --zone-name "$DOMAIN_DNS_ZONE_NAME" \
+              --name "$RECORD_SET_NAME" \
+              --set "txtRecords[0].value[0]=\"$TOKEN\"" \
+              --subscription "$AZ_SUBSCRIPTION_SCOPE" \
+              --resource-group "$RESOURCE_GROUP" \
+              --query provisioningState -o tsv --only-show-errors 2>/dev/null || echo "UpdateFailed"
+            )
+
+            print "DEBUG" "Set DNS TXT Record for '$DOMAIN_NAME' status: $RECORD_SET_PROVISIONING_STATE"
+
+            DOMAIN_EVENT_DETAILS+="*DNS Update Result:* $RECORD_SET_PROVISIONING_STATE.\n"
+          else
+            print "INFO" "DNS TXT Record for '$DOMAIN_NAME' is already up-to-date."
+            DOMAIN_EVENT_DETAILS+="*DNS Action:* TXT record already valid (\`$TOKEN\`).\n"
           fi
         else
-          print "INFO" "DNS TXT Record is still valid"
+          print "WARNING" "Could not determine DNS Zone Name from ID for domain '$DOMAIN_NAME'."
+          DOMAIN_EVENT_DETAILS+="*DNS Action:* Skipped - Could not resolve DNS Zone Name.\n"
         fi
+      elif [ -z "$DOMAIN_DNS_ZONE_ID" ] || [ "$DOMAIN_DNS_ZONE_ID" == "null" ];
+      then
+        print "ERROR" "No Azure DNS Zone linked for domain '$DOMAIN_NAME'. Cannot automate TXT record update."
+        DOMAIN_EVENT_DETAILS+="*DNS Action:* Skipped - No Azure DNS Zone linked.\n"
+      else
+        print "WARNING" "No validation token available for '$DOMAIN_NAME'. Skipping DNS update."
+        DOMAIN_EVENT_DETAILS+="*DNS Action:* Skipped - No token available.\n"
       fi
-    done
-  else
-    print "INFO" "No domains found"
-  fi
-done
 
-print "INFO" "Finished execution. $COUNT_ACTIONED domains were updated. $COUNT_DISMISSED domains were valid"
+      COUNT_ACTIONED=$((COUNT_ACTIONED+1))
+    else
+      COUNT_DISMISSED=$((COUNT_DISMISSED+1))
+      DOMAIN_EVENT_DETAILS+="*Action:* No action taken, state is '$STATE'."
+    fi
 
-if [ "$NOTIFY" == 1 ];
+    # Add the event details for this domain to the list if an action was attempted or it was pending
+    if [ "$ACTION_TAKEN_FLAG" = true ];
+    then
+      NEW_FIELD_JSON=$(jq -n --arg text_content "$(echo -e "$DOMAIN_EVENT_DETAILS")" '{type: "mrkdwn", text: $text_content}')
+      ALL_DOMAIN_EVENT_FIELDS=$(jq -n --argjson existing "$ALL_DOMAIN_EVENT_FIELDS" --argjson new "$NEW_FIELD_JSON" '$existing + [$new]')
+    fi
+  done < <(echo "$MANAGED_DOMAINS_JSON_DATA")
+done < <(echo "$AFD_LIST_JSON" | jq -rc '.[] | { "name": .name, "resourceGroup": .resourceGroup }')
+
+# --- Final Consolidated Notification ---
+MSG="Finished scanning $COUNT_AFD AFD Profiles and processed/actioned $COUNT_ACTIONED domains. $COUNT_DISMISSED domains were already valid/non-pending."
+print "INFO" "$MSG"
+
+if [ "$NOTIFY" == 1 ] && [ -f "$NOTIFY_SCRIPT_PATH" ];
 then
-  bash "$APP_ROOT/bin/notify" \
-    -t "Finished execution. $COUNT_ACTIONED domains were updated. $COUNT_DISMISSED domains were valid"
+    NOTIFY_SLACK_LABEL="$COUNT_ACTIONED actioned/pending, $COUNT_DISMISSED valid"
+    NOTIFY_SLACK_COLOR="#007fff" # Default Blue
+
+    if [ "$COUNT_ACTIONED" -gt 0 ];
+    then
+      NOTIFY_SLACK_COLOR="#FFA500" # Orange for actioned/pending
+    elif [ "$COUNT_ACTIONED" -eq 0 ] && [ "$COUNT_DISMISSED" -gt 0 ];
+    then
+      NOTIFY_SLACK_COLOR="#36A64F" # Green if no actions and some domains were valid
+    fi
+
+    if [ "$(echo "$ALL_DOMAIN_EVENT_FIELDS" | jq 'length')" -gt 0 ];
+    then
+        bash "$NOTIFY_SCRIPT_PATH" \
+          -t "$NOTIFY_SLACK_HEADING" \
+          -l "*Result:* $NOTIFY_SLACK_LABEL" \
+          -d "*Message:* $MSG" \
+          -c "$NOTIFY_SLACK_COLOR" \
+          -b "$ALL_DOMAIN_EVENT_FIELDS"
+    else
+        bash "$NOTIFY_SCRIPT_PATH" \
+          -t "$NOTIFY_SLACK_HEADING" \
+          -l "*Result:* $NOTIFY_SLACK_LABEL" \
+          -d "*Message:* $MSG" \
+          -c "$NOTIFY_SLACK_COLOR"
+    fi
 fi
+
+print "INFO" "Azure Front Door Domain Validation Renewal task finished."
