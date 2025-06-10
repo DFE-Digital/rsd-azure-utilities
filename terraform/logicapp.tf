@@ -45,7 +45,7 @@ resource "azurerm_logic_app_trigger_recurrence" "start" {
   name         = "scheduled-start"
   time_zone    = "W. Europe Standard Time"
   logic_app_id = azurerm_logic_app_workflow.logicapp[0].id
-  frequency    = "Day"
+  frequency    = "Week"
   interval     = 1
 
   schedule {
