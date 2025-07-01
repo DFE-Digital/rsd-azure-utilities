@@ -182,7 +182,7 @@ do
       DOMAIN_VALIDATION_EXPIRY_DATE_COMP=${DOMAIN_VALIDATION_EXPIRY_DATE//-/}
       TODAY_COMP=${TODAY//-/} # TODAY is YYYY-MM-DD, convert to YYYYMMDD
 
-      print "DEBUG" "Token $TOKEN expires on $DOMAIN_VALIDATION_EXPIRY_DATE"
+      print "DEBUG" "Validation Token: '$TOKEN' expires on $DOMAIN_VALIDATION_EXPIRY_DATE"
 
       if [[ "$DOMAIN_VALIDATION_EXPIRY_DATE_COMP" < "$TODAY_COMP" ]];
       then
@@ -209,20 +209,28 @@ do
         [ "$DOMAIN_DNS_ZONE_ID" != "null" ] &&
         [ -n "$DOMAIN_DNS_ZONE_ID" ];
       then
-        DOMAIN_DNS_ZONE_NAME=$(az network dns zone show --ids "$DOMAIN_DNS_ZONE_ID" --query name -o tsv --only-show-errors 2>/dev/null || echo "")
+        DOMAIN_DNS_ZONE=$(az network dns zone show --ids "$DOMAIN_DNS_ZONE_ID" -o json --only-show-errors 2>/dev/null || echo "")
 
-        if [ -n "$DOMAIN_DNS_ZONE_NAME" ];
+        if [ -n "$DOMAIN_DNS_ZONE" ];
         then
+          DOMAIN_DNS_ZONE_NAME=$(echo "$DOMAIN_DNS_ZONE" | jq -r '.name')
+          DOMAIN_DNS_ZONE_RG=$(echo "$DOMAIN_DNS_ZONE" | jq -r '.resourceGroup')
+
+          print "DEBUG" "DNS Zone Name: '$DOMAIN_DNS_ZONE_NAME'."
+          print "DEBUG" "DNS Zone Resource Group: '$DOMAIN_DNS_ZONE_RG'."
+
           RECORD_SET_NAME_TMP=${DOMAIN_NAME//${DOMAIN_DNS_ZONE_NAME}/}
           RECORD_SET_NAME_TMP="_dnsauth.${RECORD_SET_NAME_TMP}"
           RECORD_SET_NAME=${RECORD_SET_NAME_TMP/%./}
+
+          print "DEBUG" "DNS Zone Record Set Name: '$RECORD_SET_NAME'"
 
           # Get the existing record to determine if we need to do anything
           RECORD_SET_CURRENT_DNS_TOKEN=$(az network dns record-set txt show \
             --zone-name "$DOMAIN_DNS_ZONE_NAME" \
             --name "$RECORD_SET_NAME" \
             --subscription "$AZ_SUBSCRIPTION_SCOPE"  \
-            --resource-group "$RESOURCE_GROUP" \
+            --resource-group "$DOMAIN_DNS_ZONE_RG" \
             --query "txtRecords[0].value[0]" -o tsv --only-show-errors 2>/dev/null || echo "NOT_FOUND"
           )
 
@@ -232,25 +240,28 @@ do
 
             if [ "$RECORD_SET_CURRENT_DNS_TOKEN" == "NOT_FOUND" ];
             then
-              print "DEBUG" "Record set '$RECORD_SET_NAME' not found, will attempt to create."
+              print "INFO" "Record set '$RECORD_SET_NAME' not found, will attempt to create."
             else
-              print "INFO" "Record set '$DOMAIN_NAME' needs updating, will attempt to update."
+              print "INFO" "Record set '$RECORD_SET_NAME' needs updating, will attempt to update."
             fi
+
+            print "DEBUG" "DNS Zone Action: ${RECORD_SET_NAME}.${DOMAIN_DNS_ZONE_NAME}. IN TXT \"$TOKEN\""
 
             RECORD_SET_PROVISIONING_STATE=$(az network dns record-set txt update \
               --zone-name "$DOMAIN_DNS_ZONE_NAME" \
               --name "$RECORD_SET_NAME" \
               --set "txtRecords[0].value[0]=\"$TOKEN\"" \
               --subscription "$AZ_SUBSCRIPTION_SCOPE" \
-              --resource-group "$RESOURCE_GROUP" \
+              --resource-group "$DOMAIN_DNS_ZONE_RG" \
               --query provisioningState -o tsv --only-show-errors 2>/dev/null || echo "UpdateFailed"
             )
 
             print "DEBUG" "Set DNS TXT Record for '$DOMAIN_NAME' status: $RECORD_SET_PROVISIONING_STATE"
 
-            DOMAIN_EVENT_DETAILS+="*DNS Update Result:* $RECORD_SET_PROVISIONING_STATE.\n"
+            DOMAIN_EVENT_DETAILS+="*DNS Zone Update Result:* $RECORD_SET_PROVISIONING_STATE.\n"
           else
             print "INFO" "DNS TXT Record for '$DOMAIN_NAME' is already up-to-date."
+
             DOMAIN_EVENT_DETAILS+="*DNS Action:* TXT record already valid (\`$TOKEN\`).\n"
           fi
         else
