@@ -14,6 +14,9 @@ locals {
   tfvars_filename                    = var.tfvars_filename
   api_connection_client_id           = var.api_connection_client_id
   key_vault_subnet_cidr              = cidrsubnet(local.virtual_network_address_space, 21 - local.virtual_network_address_space_mask, 2)
+  schedule_hour                      = var.schedule_hour
+  schedule_minute                    = var.schedule_minute
+  schedule_frequency                 = var.schedule_frequency
   key_vault_targets                  = var.key_vault_targets
   tags                               = var.tags
 }

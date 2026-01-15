@@ -70,3 +70,21 @@ variable "key_vault_targets" {
   }))
   default = {}
 }
+
+variable "schedule_hour" {
+  description = "Hour to trigger the container instance"
+  type        = string
+  default     = "06"
+}
+
+variable "schedule_minute" {
+  description = "Minute to trigger the container instance"
+  type        = string
+  default     = "30"
+}
+
+variable "schedule_frequency" {
+  description = "Schedule frequency, eg. Day, Week"
+  type        = string
+  default     = "Week"
+}

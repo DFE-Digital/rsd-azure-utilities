@@ -13,9 +13,9 @@
 
 | Name | Version |
 |------|---------|
-| <a name="provider_azapi"></a> [azapi](#provider\_azapi) | 2.4.0 |
+| <a name="provider_azapi"></a> [azapi](#provider\_azapi) | 2.8.0 |
 | <a name="provider_azuread"></a> [azuread](#provider\_azuread) | 2.53.1 |
-| <a name="provider_azurerm"></a> [azurerm](#provider\_azurerm) | 4.28.0 |
+| <a name="provider_azurerm"></a> [azurerm](#provider\_azurerm) | 4.57.0 |
 | <a name="provider_time"></a> [time](#provider\_time) | 0.13.1 |
 
 ## Modules
@@ -68,6 +68,9 @@
 | <a name="input_key_vault_access_ipv4"></a> [key\_vault\_access\_ipv4](#input\_key\_vault\_access\_ipv4) | List of IPv4 Addresses that are permitted to access the Key Vault | `list(string)` | n/a | yes |
 | <a name="input_key_vault_targets"></a> [key\_vault\_targets](#input\_key\_vault\_targets) | List of Key Vault resource names and resource groups that you want the utilities containers to be able to access | <pre>map(object({<br/>    name                = string<br/>    resource_group_name = string<br/>  }))</pre> | `{}` | no |
 | <a name="input_registry_server"></a> [registry\_server](#input\_registry\_server) | Hostname of the Container Registry | `string` | n/a | yes |
+| <a name="input_schedule_frequency"></a> [schedule\_frequency](#input\_schedule\_frequency) | Schedule frequency, eg. Day, Week | `string` | `"Week"` | no |
+| <a name="input_schedule_hour"></a> [schedule\_hour](#input\_schedule\_hour) | Hour to trigger the container instance | `string` | `"06"` | no |
+| <a name="input_schedule_minute"></a> [schedule\_minute](#input\_schedule\_minute) | Minute to trigger the container instance | `string` | `"30"` | no |
 | <a name="input_tags"></a> [tags](#input\_tags) | Tags to assign to the resources | `map(string)` | `{}` | no |
 | <a name="input_tfvars_filename"></a> [tfvars\_filename](#input\_tfvars\_filename) | tfvars filename. This file is uploaded and stored encrypted within Key Vault, to ensure that the latest tfvars are stored in a shared place. | `string` | n/a | yes |
 
