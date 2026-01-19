@@ -6,7 +6,7 @@ resource "azurerm_logic_app_workflow" "logicapp" {
   resource_group_name = azurerm_resource_group.default.name
 
   parameters = { "$connections" = jsonencode({
-    "${azurerm_api_connection.linkedservice[0].name}" = {
+    (azurerm_api_connection.linkedservice[0].name) = {
       connectionId   = azurerm_api_connection.linkedservice[0].id
       connectionName = azurerm_api_connection.linkedservice[0].name
       id             = data.azurerm_managed_api.container_instance_group.id
@@ -45,12 +45,12 @@ resource "azurerm_logic_app_trigger_recurrence" "start" {
   name         = "scheduled-start"
   time_zone    = "W. Europe Standard Time"
   logic_app_id = azurerm_logic_app_workflow.logicapp[0].id
-  frequency    = "Week"
+  frequency    = local.schedule_frequency
   interval     = 1
 
   schedule {
-    at_these_hours   = [06]
-    at_these_minutes = [30]
+    at_these_hours   = [local.schedule_hour]
+    at_these_minutes = [local.schedule_minute]
   }
 }
 
