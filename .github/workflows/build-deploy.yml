@@ -71,7 +71,7 @@ jobs:
           client-id: ${{ secrets.ACI_CLIENT_ID }}
 
       - name: Restart Container
-        uses: azure/cli@v2
+        uses: azure/cli@v3
         with:
           inlineScript: |
             az container start \
